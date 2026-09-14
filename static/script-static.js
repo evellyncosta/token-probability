@@ -352,8 +352,6 @@ function updateTooltipPosition(event) {
 // Function handles both local and GitHub Pages environments
 async function generateResponse() {
     const promptInput = document.getElementById('prompt-input');
-    const endpointInput = document.getElementById('endpoint-input');
-    const apiKeyInput = document.getElementById('api-key-input');
     const generateBtn = document.getElementById('generate-btn');
     const responseElement = document.getElementById('response-text');
     
@@ -366,24 +364,11 @@ async function generateResponse() {
     
     // Check if we're in static demo mode (GitHub Pages)
     if (!isLocalEnvironment) {
-        alert('This is a static demo version hosted on GitHub Pages.\n\nTo use live API functionality:\n1. Clone the repository from GitHub\n2. Run the Flask application locally\n3. Enter your Azure OpenAI credentials\n\nFor now, try the demo examples above!');
+        alert('This is a static demo version hosted on GitHub Pages.\n\nTo use live API functionality:\n1. Clone the repository from GitHub\n2. Run the Flask application locally\n3. Configure OPENAI_API_KEY in your .env file\n\nFor now, try the demo examples above!');
         return;
     }
     
     // Local environment - proceed with actual API call
-    const endpoint = endpointInput.value.trim();
-    const apiKey = apiKeyInput.value.trim();
-    
-    if (!endpoint) {
-        alert('Please enter your Azure OpenAI endpoint');
-        return;
-    }
-    
-    if (!apiKey) {
-        alert('Please enter your API key');
-        return;
-    }
-    
     // Update UI for loading state
     generateBtn.disabled = true;
     generateBtn.innerHTML = '<span class="loading"></span> Generating...';
@@ -408,13 +393,12 @@ async function generateResponse() {
     chatContainer.insertBefore(userMessage, chatContainer.firstChild);
     
     try {
-        // Call the backend with the user-provided endpoint and API key
-        const response = await makeApiCall(prompt, endpoint, apiKey);
+        const response = await makeApiCall(prompt);
         
         displayResponse(response.text, response.tokenProbs);
         
     } catch (error) {
-        responseElement.textContent = 'Error generating response. Please check your endpoint and API key.';
+        responseElement.textContent = 'Error generating response. Please check the server configuration and try again.';
         console.error('Error:', error);
     } finally {
         // Reset button state
@@ -424,7 +408,7 @@ async function generateResponse() {
 }
 
 // API call function for local environment
-async function makeApiCall(prompt, endpoint, apiKey) {
+async function makeApiCall(prompt) {
     try {
         const response = await fetch('/api/generate', {
             method: 'POST',
@@ -433,8 +417,6 @@ async function makeApiCall(prompt, endpoint, apiKey) {
             },
             body: JSON.stringify({
                 prompt: prompt,
-                endpoint: endpoint,
-                api_key: apiKey,
                 top_k: 5,
                 temperature: 0.0
             })

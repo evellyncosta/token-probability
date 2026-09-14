@@ -10,7 +10,7 @@ A Flask web application and Jupyter notebook for visualizing LLM token probabili
 Visit the [live demo](https://marlenezw.github.io/token-probability) to see the token probability visualization in action with sample data.
 
 ### Local Development (Full Functionality)
-For live API integration with Azure OpenAI:
+For live token probability analysis with OpenAI:
 
 1. **Clone the repository**
    ```bash
@@ -23,23 +23,24 @@ For live API integration with Azure OpenAI:
    pip install -r requirements.txt
    ```
 
-3. **Run the Flask app**
+3. **Configure OpenAI**
+   ```bash
+   cp .env.example .env
+   ```
+   Edit `.env` and set `OPENAI_API_KEY` to your OpenAI API key. This key stays on the server and is never entered in the browser.
+
+4. **Run the Flask app**
    ```bash
    python app.py
    ```
 
-4. **Open your browser**
+5. **Open your browser**
    Navigate to `http://localhost:5000`
-
-5. **Configure Azure OpenAI**
-   - Enter your Azure OpenAI endpoint
-   - Enter your API key
-   - Start generating responses with token probabilities!
 
 ## 🌟 Features
 
 - **Interactive Visualization**: Hover over tokens to see probability distributions
-- **Live API Integration**: Connect to Azure OpenAI for real-time token probability analysis
+- **Live API Integration**: Connect to OpenAI for real-time token probability analysis
 - **Responsive Design**: Works on desktop and mobile devices
 - **Demo Mode**: GitHub Pages deployment with sample data for demonstration
 
@@ -47,7 +48,7 @@ For live API integration with Azure OpenAI:
 
 ### Local Environment
 - Full Flask backend with `/api/generate` endpoint
-- Real-time API calls to Azure OpenAI
+- Real-time API calls to OpenAI using server-side environment configuration
 - Live token probability analysis
 - Complete interactivity
 
@@ -77,7 +78,7 @@ For live API integration with Azure OpenAI:
 
 - **Backend**: Flask with CORS support
 - **Frontend**: Vanilla JavaScript with CSS Grid/Flexbox
-- **API**: Azure OpenAI with logprobs enabled
+- **API**: OpenAI Chat Completions with logprobs enabled
 - **Deployment**: Dual-mode (local Flask + static GitHub Pages)
 
 ## 🤝 Contributing

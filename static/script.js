@@ -227,30 +227,15 @@ function updateTooltipPosition(event) {
     tooltip.style.top = `${top}px`;
 }
 
-// Mock function to simulate API call
 async function generateResponse() {
     const promptInput = document.getElementById('prompt-input');
-    const endpointInput = document.getElementById('endpoint-input');
-    const apiKeyInput = document.getElementById('api-key-input');
     const generateBtn = document.getElementById('generate-btn');
     const responseElement = document.getElementById('response-text');
     
     const prompt = promptInput.value.trim();
-    const endpoint = endpointInput.value.trim();
-    const apiKey = apiKeyInput.value.trim();
     
     if (!prompt) {
         alert('Please enter a prompt');
-        return;
-    }
-    
-    if (!endpoint) {
-        alert('Please enter your Azure OpenAI endpoint');
-        return;
-    }
-    
-    if (!apiKey) {
-        alert('Please enter your API key');
         return;
     }
     
@@ -278,13 +263,12 @@ async function generateResponse() {
     chatContainer.insertBefore(userMessage, chatContainer.firstChild);
     
     try {
-        // Call the backend with the user-provided endpoint and API key
-        const response = await makeApiCall(prompt, endpoint, apiKey);
+        const response = await makeApiCall(prompt);
         
         displayResponse(response.text, response.tokenProbs);
         
     } catch (error) {
-        responseElement.textContent = 'Error generating response. Please check your endpoint and API key.';
+        responseElement.textContent = 'Error generating response. Please check the server configuration and try again.';
         console.error('Error:', error);
     } finally {
         // Reset button state
@@ -293,8 +277,7 @@ async function generateResponse() {
     }
 }
 
-// API call function with user-provided endpoint and API key
-async function makeApiCall(prompt, endpoint, apiKey) {
+async function makeApiCall(prompt) {
     try {
         const response = await fetch('/api/generate', {
             method: 'POST',
@@ -303,8 +286,6 @@ async function makeApiCall(prompt, endpoint, apiKey) {
             },
             body: JSON.stringify({
                 prompt: prompt,
-                endpoint: endpoint,
-                api_key: apiKey,
                 top_k: 5,
                 temperature: 0.0
             })
