@@ -193,12 +193,42 @@ const sampleResponses = [
     }
 ];
 
+const wordDemoResponses = [
+    {
+        prompt: "The weather today is ",
+        response: {
+            text: "sunny",
+            tokenProbs: [
+                { selected_token: "sun", selected_prob: 0.71, top_logprobs: [{ token: "sun", probability: 0.71 }, { token: "rain", probability: 0.19 }, { token: "cloud", probability: 0.08 }] },
+                { selected_token: "ny", selected_prob: 0.94, top_logprobs: [{ token: "ny", probability: 0.94 }, { token: "shine", probability: 0.04 }, { token: "day", probability: 0.01 }] }
+            ]
+        }
+    },
+    {
+        prompt: "Machine learning is ",
+        response: {
+            text: "powerful",
+            tokenProbs: [
+                { selected_token: "power", selected_prob: 0.64, top_logprobs: [{ token: "power", probability: 0.64 }, { token: "transform", probability: 0.22 }, { token: "use", probability: 0.11 }] },
+                { selected_token: "ful", selected_prob: 0.90, top_logprobs: [{ token: "ful", probability: 0.90 }, { token: "ly", probability: 0.06 }, { token: "ness", probability: 0.03 }] }
+            ]
+        }
+    }
+];
+
 // Check if we're running locally or on GitHub Pages
 const isLocalEnvironment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
 // Initialize the page
 document.addEventListener('DOMContentLoaded', function() {
-    displayResponse(sampleResponse.text, sampleResponse.tokenProbs);
+    displayResponse('o gato subiu no ', 'telhado', [
+        { selected_token: 'tel', selected_prob: 0.60, top_logprobs: [
+            { token: 'tel', probability: 0.60 }, { token: 'mur', probability: 0.30 }, { token: 'so', probability: 0.10 }
+        ] },
+        { selected_token: 'hado', selected_prob: 0.92, top_logprobs: [
+            { token: 'hado', probability: 0.92 }, { token: 'has', probability: 0.05 }, { token: 'ha', probability: 0.02 }
+        ] }
+    ]);
     if (!isLocalEnvironment) {
         setupStaticDemo();
     }
@@ -231,7 +261,7 @@ function setupStaticDemo() {
 }
 
 function loadDemoExample(index) {
-    const example = sampleResponses[index];
+    const example = wordDemoResponses[index];
     const promptInput = document.getElementById('prompt-input');
     const userMessageContent = document.querySelector('.user-message .message-content .prompt-text');
     
@@ -242,7 +272,7 @@ function loadDemoExample(index) {
     userMessageContent.textContent = example.prompt;
     
     // Display the response
-    displayResponse(example.response.text, example.response.tokenProbs);
+    displayResponse(example.prompt, example.response.text, example.response.tokenProbs);
 }
 
 function loadOriginalExample() {
@@ -250,34 +280,42 @@ function loadOriginalExample() {
     const userMessageContent = document.querySelector('.user-message .message-content .prompt-text');
     
     // Reset to original example
-    promptInput.value = "It's a lovely day at DjangoCon, let's go to the";
-    userMessageContent.textContent = "It's a lovely day at DjangoCon, let's go to the";
+    promptInput.value = "o gato subiu no ";
+    userMessageContent.textContent = "o gato subiu no ";
     
-    displayResponse(sampleResponse.text, sampleResponse.tokenProbs);
+    displayResponse('o gato subiu no ', 'telhado', [
+        { selected_token: 'tel', selected_prob: 0.60, top_logprobs: [{ token: 'tel', probability: 0.60 }, { token: 'mur', probability: 0.30 }, { token: 'so', probability: 0.10 }] },
+        { selected_token: 'hado', selected_prob: 0.92, top_logprobs: [{ token: 'hado', probability: 0.92 }, { token: 'has', probability: 0.05 }, { token: 'ha', probability: 0.02 }] }
+    ]);
 }
 
-function displayResponse(text, tokenProbs) {
+let currentPrompt = '';
+
+function formatToken(token) {
+    return token.replace(/ /g, '␠').replace(/\n/g, '↵').replace(/\t/g, '⇥');
+}
+
+function displayResponse(prompt, text, tokenProbs) {
+    currentPrompt = prompt;
     currentTokenProbs = tokenProbs;
     const responseElement = document.getElementById('response-text');
     responseElement.innerHTML = '';
     
     tokenProbs.forEach((tokenData, index) => {
-        const span = document.createElement('span');
-        span.className = 'token';
-        span.textContent = tokenData.selected_token;
-        span.dataset.tokenIndex = index;
+        const tokenButton = document.createElement('button');
+        tokenButton.type = 'button';
+        tokenButton.className = 'token';
+        tokenButton.textContent = formatToken(tokenData.selected_token);
+        tokenButton.dataset.tokenIndex = index;
         
         // Add probability-based class
         const probClass = getProbabilityClass(tokenData.selected_prob);
-        span.classList.add(probClass);
+        tokenButton.classList.add(probClass);
+        tokenButton.addEventListener('click', () => selectToken(index));
         
-        // Add event listeners for hover
-        span.addEventListener('mouseenter', showTooltip);
-        span.addEventListener('mouseleave', hideTooltip);
-        span.addEventListener('mousemove', updateTooltipPosition);
-        
-        responseElement.appendChild(span);
+        responseElement.appendChild(tokenButton);
     });
+    selectToken(0);
 }
 
 function getProbabilityClass(probability) {
@@ -288,65 +326,27 @@ function getProbabilityClass(probability) {
     return 'prob-very-low';
 }
 
-function showTooltip(event) {
-    const tokenIndex = parseInt(event.target.dataset.tokenIndex);
+function selectToken(tokenIndex) {
     const tokenData = currentTokenProbs[tokenIndex];
-    const tooltip = document.getElementById('tooltip');
-    const tooltipBody = document.getElementById('tooltip-body');
-    
-    // Clear previous content
-    tooltipBody.innerHTML = '';
-    
-    // Add probability items
-    tokenData.top_logprobs.forEach((item, index) => {
-        const probItem = document.createElement('div');
-        probItem.className = 'prob-item';
-        
-        const tokenSpan = document.createElement('span');
-        tokenSpan.className = 'prob-token';
-        if (item.token === tokenData.selected_token) {
-            tokenSpan.classList.add('selected-token');
-        }
-        tokenSpan.textContent = `"${item.token}"`;
-        
-        const probSpan = document.createElement('span');
-        probSpan.className = 'prob-value';
-        probSpan.textContent = `${(item.probability * 100).toFixed(1)}%`;
-        
-        probItem.appendChild(tokenSpan);
-        probItem.appendChild(probSpan);
-        tooltipBody.appendChild(probItem);
+    document.getElementById('token-context').textContent = currentPrompt + currentTokenProbs.slice(0, tokenIndex).map(item => item.selected_token).join('');
+    document.querySelectorAll('.token').forEach((button, index) => {
+        button.classList.toggle('token-selected', index === tokenIndex);
+        button.setAttribute('aria-pressed', String(index === tokenIndex));
     });
-    
-    tooltip.style.display = 'block';
-    updateTooltipPosition(event);
-}
-
-function hideTooltip() {
-    const tooltip = document.getElementById('tooltip');
-    tooltip.style.display = 'none';
-}
-
-function updateTooltipPosition(event) {
-    const tooltip = document.getElementById('tooltip');
-    const tooltipRect = tooltip.getBoundingClientRect();
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    
-    let left = event.pageX + 10;
-    let top = event.pageY - 10;
-    
-    // Adjust if tooltip would go off screen
-    if (left + tooltipRect.width > viewportWidth) {
-        left = event.pageX - tooltipRect.width - 10;
-    }
-    
-    if (top + tooltipRect.height > viewportHeight) {
-        top = event.pageY - tooltipRect.height - 10;
-    }
-    
-    tooltip.style.left = `${left}px`;
-    tooltip.style.top = `${top}px`;
+    const rows = [...tokenData.top_logprobs];
+    if (!rows.some(item => item.token === tokenData.selected_token)) rows.unshift({ token: tokenData.selected_token, probability: tokenData.selected_prob });
+    const tableBody = document.getElementById('probability-table-body');
+    tableBody.innerHTML = '';
+    rows.forEach(item => {
+        const row = document.createElement('tr');
+        if (item.token === tokenData.selected_token) row.className = 'selected-candidate';
+        const tokenCell = document.createElement('td');
+        tokenCell.textContent = `"${formatToken(item.token)}"`;
+        const probabilityCell = document.createElement('td');
+        probabilityCell.textContent = `${(item.probability * 100).toFixed(1)}%`;
+        row.append(tokenCell, probabilityCell);
+        tableBody.appendChild(row);
+    });
 }
 
 // Function handles both local and GitHub Pages environments
@@ -355,9 +355,9 @@ async function generateResponse() {
     const generateBtn = document.getElementById('generate-btn');
     const responseElement = document.getElementById('response-text');
     
-    const prompt = promptInput.value.trim();
+    const prompt = promptInput.value;
     
-    if (!prompt) {
+    if (!prompt.trim()) {
         alert('Please enter a prompt');
         return;
     }
@@ -395,7 +395,7 @@ async function generateResponse() {
     try {
         const response = await makeApiCall(prompt);
         
-        displayResponse(response.text, response.tokenProbs);
+        displayResponse(prompt, response.text, response.tokenProbs);
         
     } catch (error) {
         responseElement.textContent = 'Error generating response. Please check the server configuration and try again.';

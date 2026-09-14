@@ -10,13 +10,13 @@
     <div class="container">
         <div class="header">
             <h1>LLM Token Probability Visualizer</h1>
-            <p>Hover over words to see their probability distributions</p>
+            <p>Veja como uma palavra e construida token por token</p>
         </div>
         
         <div class="chat-container">
             <div class="message user-message">
                 <div class="message-content">
-                    <span class="prompt-text">It's a lovely day at DjangoCon, let's go to the</span>
+                    <span class="prompt-text">o gato subiu no </span>
                 </div>
             </div>
             
@@ -28,6 +28,18 @@
                 </div>
             </div>
         </div>
+
+        <section id="token-analysis" class="token-analysis" aria-live="polite">
+            <h2>Proximo token</h2>
+            <p class="token-context">Contexto antes da escolha: <code id="token-context"></code></p>
+            <table class="probability-table">
+                <thead>
+                    <tr><th>Token</th><th>Probabilidade</th></tr>
+                </thead>
+                <tbody id="probability-table-body"></tbody>
+            </table>
+            <p class="probability-note">A tabela mostra somente os tokens mais provaveis; outros tokens tambem podem ter probabilidade.</p>
+        </section>
         
         <div class="input-section">
             <div class="input-container">
@@ -36,13 +48,6 @@
             </div>
         </div>
         
-        <!-- Tooltip for probability display -->
-        <div id="tooltip" class="tooltip">
-            <div class="tooltip-content">
-                <div class="tooltip-header">Token Probabilities</div>
-                <div id="tooltip-body"></div>
-            </div>
-        </div>
     </div>
     
     <script src="{{ url_for('static', filename='script.js') }}"></script>

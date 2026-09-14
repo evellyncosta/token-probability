@@ -39,7 +39,8 @@ For live token probability analysis with OpenAI:
 
 ## 🌟 Features
 
-- **Interactive Visualization**: Hover over tokens to see probability distributions
+- **Interactive Visualization**: Click each token to inspect its next-token probability table
+- **Token Construction**: See how one predicted word can be assembled from multiple tokens
 - **Live API Integration**: Connect to OpenAI for real-time token probability analysis
 - **Responsive Design**: Works on desktop and mobile devices
 - **Demo Mode**: GitHub Pages deployment with sample data for demonstration
@@ -51,6 +52,8 @@ For live token probability analysis with OpenAI:
 - Real-time API calls to OpenAI using server-side environment configuration
 - Live token probability analysis
 - Complete interactivity
+
+The visualizer predicts one next word at a time. A word is not necessarily one token: select each displayed token to see the alternatives the model considered at that step. The table shows only the top candidates, so their probabilities do not necessarily sum to 100%.
 
 ### GitHub Pages Demo
 - Static HTML/CSS/JS deployment

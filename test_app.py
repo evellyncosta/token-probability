@@ -6,21 +6,25 @@ from unittest.mock import patch
 from app import app
 
 
-def fake_message():
+def fake_message(content="world", tokens=None):
+    tokens = tokens or ["wor", "ld"]
+    logprob_content = []
+    for token in tokens:
+        logprob_content.append(
+            {
+                "token": token,
+                "logprob": -0.1,
+                "top_logprobs": [
+                    {"token": token, "logprob": -0.1},
+                    {"token": "other", "logprob": -2.3},
+                ],
+            }
+        )
     return SimpleNamespace(
-        content=" world",
+        content=content,
         response_metadata={
             "logprobs": {
-                "content": [
-                    {
-                        "token": " world",
-                        "logprob": -0.1,
-                        "top_logprobs": [
-                            {"token": " world", "logprob": -0.1},
-                            {"token": " everyone", "logprob": -2.3},
-                        ],
-                    }
-                ]
+                "content": logprob_content
             }
         },
     )
@@ -51,15 +55,20 @@ class GenerateRouteTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["text"], " world")
+        self.assertEqual(response.get_json()["text"], "world")
+        self.assertEqual(len(response.get_json()["tokenProbs"]), 2)
+        self.assertEqual(
+            "".join(item["selected_token"] for item in response.get_json()["tokenProbs"]),
+            "world",
+        )
         token = response.get_json()["tokenProbs"][0]
-        self.assertEqual(token["selected_token"], " world")
+        self.assertEqual(token["selected_token"], "wor")
         self.assertIn("selected_prob", token)
         self.assertEqual(len(token["top_logprobs"]), 2)
         chat_openai.assert_called_once_with(
             model="gpt-4o-mini",
             temperature=0.0,
-            max_tokens=40,
+            max_tokens=16,
             logprobs=True,
             top_logprobs=5,
         )
@@ -73,3 +82,21 @@ class GenerateRouteTests(TestCase):
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.get_json(), {"error": "OpenAI generation request failed."})
+
+    @patch("app.ChatOpenAI")
+    def test_rejects_multiple_words_without_truncating_tokens(self, chat_openai):
+        chat_openai.return_value.invoke.return_value = fake_message(
+            "two words", ["two", " words"]
+        )
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
+            response = self.client.post("/api/generate", json={"prompt": "Hello"})
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.get_json(), {"error": "OpenAI did not return a valid next word."})
+
+    @patch("app.ChatOpenAI")
+    def test_rejects_punctuation_without_altering_tokens(self, chat_openai):
+        chat_openai.return_value.invoke.return_value = fake_message("word!", ["word", "!"])
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
+            response = self.client.post("/api/generate", json={"prompt": "Hello"})
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.get_json(), {"error": "OpenAI did not return a valid next word."})

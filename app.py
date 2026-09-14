@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 import os
 import math
+import re
 from typing import Dict, List, Tuple
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
@@ -13,9 +14,14 @@ CORS(app)  # Enable CORS for all routes
 
 MODEL_NAME = "gpt-4o-mini"
 SYSTEM_PROMPT = (
-    "You are a helpful assistant. Complete the user's sentence given the "
-    "context. Only return the completed part of the sentence."
+    "You are a next-word predictor. Given the user's text context, return "
+    "exactly one lexical word that naturally continues it. Return only the "
+    "word, with no punctuation, quotation marks, markdown, explanation, or "
+    "additional words. If the context does not end in whitespace, you may "
+    "include one leading space needed to continue it."
 )
+MAX_WORD_TOKENS = 16
+WORD_PATTERN = re.compile(r"[^\W\d_]+(?:[-'][^\W\d_]+)*$", re.UNICODE)
 
 
 def get_model_response(
@@ -38,7 +44,7 @@ def get_model_response(
     model = ChatOpenAI(
         model=MODEL_NAME,
         temperature=temperature,
-        max_tokens=40,
+        max_tokens=MAX_WORD_TOKENS,
         logprobs=True,
         top_logprobs=top_k,
     )
@@ -73,7 +79,23 @@ def get_model_response(
             "top_logprobs": top_items
         })
 
+    validate_next_word(response_text, token_probs)
     return response_text, token_probs
+
+
+def validate_next_word(response_text: str, token_probs: List[Dict]) -> None:
+    """Reject output that cannot be displayed as one faithful lexical word."""
+    raw_tokens = "".join(token["selected_token"] for token in token_probs)
+    word = response_text[1:] if response_text.startswith(" ") else response_text
+
+    if (
+        raw_tokens != response_text
+        or not word
+        or response_text != response_text.rstrip()
+        or response_text.startswith(("\n", "\t"))
+        or not WORD_PATTERN.fullmatch(word)
+    ):
+        raise RuntimeError("OpenAI did not return a valid next word.")
 
 
 def get_generation_settings(data: Dict) -> Tuple[int, float]:
