@@ -221,7 +221,7 @@ const isLocalEnvironment = window.location.hostname === 'localhost' || window.lo
 
 // Initialize the page
 document.addEventListener('DOMContentLoaded', function() {
-    displayResponse('o gato subiu no ', 'telhado', [
+    displayResponse('o gato subiu no ', 'telhado', demoPromptTokens('o gato subiu no '), [
         { selected_token: 'tel', selected_prob: 0.60, top_logprobs: [
             { token: 'tel', probability: 0.60 }, { token: 'mur', probability: 0.30 }, { token: 'so', probability: 0.10 }
         ] },
@@ -272,7 +272,7 @@ function loadDemoExample(index) {
     userMessageContent.textContent = example.prompt;
     
     // Display the response
-    displayResponse(example.prompt, example.response.text, example.response.tokenProbs);
+    displayResponse(example.prompt, example.response.text, demoPromptTokens(example.prompt), example.response.tokenProbs);
 }
 
 function loadOriginalExample() {
@@ -283,7 +283,7 @@ function loadOriginalExample() {
     promptInput.value = "o gato subiu no ";
     userMessageContent.textContent = "o gato subiu no ";
     
-    displayResponse('o gato subiu no ', 'telhado', [
+    displayResponse('o gato subiu no ', 'telhado', demoPromptTokens('o gato subiu no '), [
         { selected_token: 'tel', selected_prob: 0.60, top_logprobs: [{ token: 'tel', probability: 0.60 }, { token: 'mur', probability: 0.30 }, { token: 'so', probability: 0.10 }] },
         { selected_token: 'hado', selected_prob: 0.92, top_logprobs: [{ token: 'hado', probability: 0.92 }, { token: 'has', probability: 0.05 }, { token: 'ha', probability: 0.02 }] }
     ]);
@@ -295,9 +295,36 @@ function formatToken(token) {
     return token.replace(/ /g, '␠').replace(/\n/g, '↵').replace(/\t/g, '⇥');
 }
 
-function displayResponse(prompt, text, tokenProbs) {
+function demoPromptTokens(prompt) {
+    return [...new TextEncoder().encode(prompt)].map((byte, index) => ({ id: index, bytes: [byte] }));
+}
+
+function formatPromptToken(token) {
+    const bytes = new Uint8Array(token.bytes || []);
+    try {
+        return formatToken(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    } catch (_) {
+        return [...bytes].map(byte => `\\x${byte.toString(16).padStart(2, '0')}`).join('');
+    }
+}
+
+function renderPromptTokens(prompt, promptTokens) {
+    const promptElement = document.getElementById('prompt-tokens');
+    promptElement.innerHTML = '';
+    const tokens = promptTokens || demoPromptTokens(prompt);
+    tokens.forEach(token => {
+        const tokenElement = document.createElement('span');
+        tokenElement.className = 'prompt-token';
+        tokenElement.textContent = formatPromptToken(token);
+        tokenElement.title = `Token ${token.id}`;
+        promptElement.appendChild(tokenElement);
+    });
+}
+
+function displayResponse(prompt, text, promptTokens, tokenProbs) {
     currentPrompt = prompt;
     currentTokenProbs = tokenProbs;
+    renderPromptTokens(prompt, promptTokens);
     const responseElement = document.getElementById('response-text');
     responseElement.innerHTML = '';
     
@@ -378,11 +405,16 @@ async function generateResponse() {
     const chatContainer = document.querySelector('.chat-container');
     const userMessage = document.createElement('div');
     userMessage.className = 'message user-message';
-    userMessage.innerHTML = `
-        <div class="message-content">
-            <span class="prompt-text">${prompt}</span>
-        </div>
-    `;
+    const userMessageContent = document.createElement('div');
+    userMessageContent.className = 'message-content';
+    const promptLabel = document.createElement('span');
+    promptLabel.className = 'prompt-label';
+    promptLabel.textContent = 'Contexto tokenizado';
+    const promptTokensElement = document.createElement('span');
+    promptTokensElement.id = 'prompt-tokens';
+    promptTokensElement.className = 'prompt-text';
+    userMessageContent.append(promptLabel, promptTokensElement);
+    userMessage.appendChild(userMessageContent);
     
     // Remove existing user message if any
     const existingUserMessage = chatContainer.querySelector('.user-message');
@@ -395,7 +427,7 @@ async function generateResponse() {
     try {
         const response = await makeApiCall(prompt);
         
-        displayResponse(prompt, response.text, response.tokenProbs);
+        displayResponse(prompt, response.text, response.promptTokens, response.tokenProbs);
         
     } catch (error) {
         responseElement.textContent = 'Error generating response. Please check the server configuration and try again.';

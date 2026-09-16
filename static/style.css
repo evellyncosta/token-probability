@@ -77,6 +77,24 @@ body {
     color: #e2e8f0;
 }
 
+.prompt-label {
+    display: block;
+    color: #a0aec0;
+    font-size: 0.8rem;
+    margin-bottom: 6px;
+}
+
+.prompt-token {
+    display: inline-block;
+    margin: 1px;
+    padding: 1px 3px;
+    border: 1px dashed #4a5568;
+    border-radius: 3px;
+    color: #cbd5e0;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.9em;
+}
+
 .response-text {
     font-size: 1rem;
     line-height: 1.8;

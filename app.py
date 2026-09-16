@@ -6,6 +6,7 @@ import re
 from typing import Dict, List, Tuple
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
+import tiktoken
 
 load_dotenv()
 
@@ -26,11 +27,12 @@ WORD_PATTERN = re.compile(r"[^\W\d_]+(?:[-'][^\W\d_]+)*$", re.UNICODE)
 
 def get_model_response(
     prompt: str, top_k: int = 5, temperature: float = 0.0
-) -> Tuple[str, List[Dict]]:
+) -> Tuple[str, List[Dict], List[Dict]]:
     """
     Returns:
       response_text: str
-      token_probs: List[Dict] with per-token:
+      token_probs: List[Dict] with selected provider output tokens and probabilities
+      prompt_tokens: List[Dict] with tokenizer ids and raw bytes for the user context
           {
             "selected_token": str,
             "selected_prob": float,
@@ -40,6 +42,8 @@ def get_model_response(
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OpenAI API key is not configured on the server.")
+
+    prompt_tokens = tokenize_prompt(prompt)
 
     model = ChatOpenAI(
         model=MODEL_NAME,
@@ -80,7 +84,22 @@ def get_model_response(
         })
 
     validate_next_word(response_text, token_probs)
-    return response_text, token_probs
+    return response_text, token_probs, prompt_tokens
+
+
+def tokenize_prompt(prompt: str) -> List[Dict]:
+    """Represent user-context tokens without assuming each one is valid UTF-8 alone."""
+    try:
+        encoding = tiktoken.encoding_for_model(MODEL_NAME)
+    except KeyError as error:
+        raise RuntimeError(
+            "No official tokenizer encoding is configured for the selected OpenAI model."
+        ) from error
+
+    return [
+        {"id": token_id, "bytes": list(encoding.decode_single_token_bytes(token_id))}
+        for token_id in encoding.encode(prompt)
+    ]
 
 
 def validate_next_word(response_text: str, token_probs: List[Dict]) -> None:
@@ -129,11 +148,12 @@ def generate():
         if not prompt:
             return jsonify({'error': 'Prompt is required'}), 400
             
-        response_text, token_probs = get_model_response(prompt, top_k, temperature)
+        response_text, token_probs, prompt_tokens = get_model_response(prompt, top_k, temperature)
         
         return jsonify({
             'text': response_text,
-            'tokenProbs': token_probs
+            'tokenProbs': token_probs,
+            'promptTokens': prompt_tokens,
         })
         
     except ValueError as error:

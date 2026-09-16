@@ -41,6 +41,7 @@ For live token probability analysis with OpenAI:
 
 - **Interactive Visualization**: Click each token to inspect its next-token probability table
 - **Token Construction**: See how one predicted word can be assembled from multiple tokens
+- **Context Tokenization**: See how the configured generation model segments the text you submitted
 - **Live API Integration**: Connect to OpenAI for real-time token probability analysis
 - **Responsive Design**: Works on desktop and mobile devices
 - **Demo Mode**: GitHub Pages deployment with sample data for demonstration
@@ -54,6 +55,8 @@ For live token probability analysis with OpenAI:
 - Complete interactivity
 
 The visualizer predicts one next word at a time. A word is not necessarily one token: select each displayed token to see the alternatives the model considered at that step. The table shows only the top candidates, so their probabilities do not necessarily sum to 100%.
+
+The context is tokenized on the server using the official tokenizer encoding resolved for the same model used to generate the word. The display covers only the text you submit; it does not claim to show the provider's internal message envelope or system prompt tokens. Tokenizer configuration and API credentials remain server-side.
 
 ### GitHub Pages Demo
 - Static HTML/CSS/JS deployment
