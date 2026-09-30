@@ -1,8 +1,13 @@
 import os
+import shutil
+import tempfile
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
+
+import yaml
 
 from app import (
     app,
@@ -14,8 +19,10 @@ from prompts import (
     MAX_TEXT_TOKENS,
     MAX_WORD_TOKENS,
     PATH_PROMPT_TEMPLATE,
+    PROMPT_TEMPLATE_DIRECTORY,
     TEXT_PROMPT_TEMPLATE,
     get_generation_profile,
+    load_generation_profiles,
     normalize_locale,
 )
 
@@ -42,6 +49,31 @@ def fake_message(content="world", tokens=None):
             }
         },
     )
+
+
+EXPECTED_PROMPT_PREFIXES = {
+    "word": (
+        "You are a next-word predictor. Given the user's text context, return "
+        "exactly one lexical word that naturally continues it. Return only the "
+        "word, with no punctuation, quotation marks, markdown, explanation, or "
+        "additional words. If the context does not end in whitespace, you may "
+        "include one leading space needed to continue it."
+    ),
+    "text": (
+        "Answer the user's request in plain text only. Do not use Markdown, headings, "
+        "lists, code fences, or inline formatting. Paragraphs are allowed when useful. "
+        "Aim for a complete answer of no more than 500 characters."
+    ),
+    "path": (
+        "Continue the user's text with the next token only. Preserve natural text and "
+        "pay attention to the ponctuation and conciseness of the text, do not forget to answer with space if necessary "
+        "spacing exactly: when the next token begins a new word after a word or "
+        "sentence-ending punctuation, include the required leading whitespace in that "
+        "token. Do not join lexical words together. Keep punctuation attached only when "
+        "it naturally follows the preceding text. Return no explanation, quotation "
+        "marks, Markdown, or additional tokens."
+    ),
+}
 
 
 class GenerateRouteTests(TestCase):
@@ -302,7 +334,39 @@ class GenerateRouteTests(TestCase):
                 system_prompt, returned_max_tokens = get_generation_profile(mode, "en")
 
                 self.assertEqual(returned_max_tokens, max_tokens)
-                self.assertIn("Respond in English.", system_prompt)
+                self.assertEqual(
+                    system_prompt,
+                    f"{EXPECTED_PROMPT_PREFIXES[mode]} Respond in English.",
+                )
+
+    def test_prompt_yaml_assets_have_the_required_fields(self):
+        for filename in ("word.yaml", "text.yaml", "path.yaml"):
+            with self.subTest(filename=filename):
+                definition = yaml.safe_load(
+                    (PROMPT_TEMPLATE_DIRECTORY / filename).read_text(encoding="utf-8")
+                )
+
+                self.assertEqual(set(definition), {"template", "max_tokens"})
+
+    def test_invalid_prompt_definitions_are_rejected_without_fallback(self):
+        invalid_definitions = {
+            "missing field": "template: '{locale_instruction}'\n",
+            "non-positive max tokens": (
+                "template: '{locale_instruction}'\nmax_tokens: 0\n"
+            ),
+            "unexpected variable": "template: '{other}'\nmax_tokens: 16\n",
+        }
+
+        for name, definition in invalid_definitions.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp_dir:
+                directory = Path(temp_dir) / "prompt_templates"
+                shutil.copytree(PROMPT_TEMPLATE_DIRECTORY, directory)
+                (directory / "word.yaml").write_text(definition, encoding="utf-8")
+
+                with self.assertRaisesRegex(
+                    RuntimeError, "Invalid prompt definition 'word.yaml'"
+                ):
+                    load_generation_profiles(directory)
 
     def test_prompt_profile_rejects_an_unknown_mode(self):
         with self.assertRaisesRegex(

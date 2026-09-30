@@ -1,0 +1,9 @@
+max_tokens: 1
+template: >-
+  Continue the user's text with the next token only. Preserve natural text and
+  pay attention to the ponctuation and conciseness of the text, do not forget to answer with space if necessary
+  spacing exactly: when the next token begins a new word after a word or
+  sentence-ending punctuation, include the required leading whitespace in that
+  token. Do not join lexical words together. Keep punctuation attached only when
+  it naturally follows the preceding text. Return no explanation, quotation
+  marks, Markdown, or additional tokens. {locale_instruction}

@@ -1,5 +1,7 @@
+from pathlib import Path
 from typing import Dict, Tuple
 
+import yaml
 from langchain_core.prompts import PromptTemplate
 
 
@@ -9,39 +11,68 @@ LOCALE_INSTRUCTIONS = {
     "pt-BR": "Respond in Brazilian Portuguese.",
     "en": "Respond in English.",
 }
-
-WORD_PROMPT_TEMPLATE = PromptTemplate.from_template(
-    "You are a next-word predictor. Given the user's text context, return "
-    "exactly one lexical word that naturally continues it. Return only the "
-    "word, with no punctuation, quotation marks, markdown, explanation, or "
-    "additional words. If the context does not end in whitespace, you may "
-    "include one leading space needed to continue it. {locale_instruction}"
-)
-MAX_WORD_TOKENS = 16
-
-TEXT_PROMPT_TEMPLATE = PromptTemplate.from_template(
-    "Answer the user's request in plain text only. Do not use Markdown, headings, "
-    "lists, code fences, or inline formatting. Paragraphs are allowed when useful. "
-    "Aim for a complete answer of no more than 500 characters. {locale_instruction}"
-)
-MAX_TEXT_TOKENS = 256
-
-PATH_PROMPT_TEMPLATE = PromptTemplate.from_template(
-    "Continue the user's text with the next token only. Preserve natural text and "
-    "pay attention to the ponctuation and conciseness of the text, do not forget to answer with space if necessary "
-    "spacing exactly: when the next token begins a new word after a word or "
-    "sentence-ending punctuation, include the required leading whitespace in that "
-    "token. Do not join lexical words together. Keep punctuation attached only when "
-    "it naturally follows the preceding text. Return no explanation, quotation "
-    "marks, Markdown, or additional tokens. {locale_instruction}"
-)
-MAX_PATH_TOKENS = 1
-
-GENERATION_PROFILES = {
-    "word": (WORD_PROMPT_TEMPLATE, MAX_WORD_TOKENS),
-    "text": (TEXT_PROMPT_TEMPLATE, MAX_TEXT_TOKENS),
-    "path": (PATH_PROMPT_TEMPLATE, MAX_PATH_TOKENS),
+PROMPT_TEMPLATE_DIRECTORY = Path(__file__).parent / "prompt_templates"
+PROMPT_FILES = {
+    "word": "word.yaml",
+    "text": "text.yaml",
+    "path": "path.yaml",
 }
+REQUIRED_PROMPT_FIELDS = {"template", "max_tokens"}
+REQUIRED_TEMPLATE_VARIABLES = {"locale_instruction"}
+
+
+def _invalid_prompt_definition(path: Path, detail: str) -> RuntimeError:
+    return RuntimeError(f"Invalid prompt definition '{path.name}': {detail}")
+
+
+def load_prompt_definition(path: Path) -> Tuple[PromptTemplate, int]:
+    try:
+        definition = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise _invalid_prompt_definition(path, "could not be loaded") from error
+
+    if not isinstance(definition, dict) or set(definition) != REQUIRED_PROMPT_FIELDS:
+        raise _invalid_prompt_definition(
+            path, "must contain only 'template' and 'max_tokens'"
+        )
+
+    template = definition["template"]
+    max_tokens = definition["max_tokens"]
+    if not isinstance(template, str) or not template.strip():
+        raise _invalid_prompt_definition(path, "template must be a non-empty string")
+    if (
+        not isinstance(max_tokens, int)
+        or isinstance(max_tokens, bool)
+        or max_tokens <= 0
+    ):
+        raise _invalid_prompt_definition(path, "max_tokens must be a positive integer")
+
+    try:
+        prompt_template = PromptTemplate.from_template(template)
+    except ValueError as error:
+        raise _invalid_prompt_definition(path, "template syntax is invalid") from error
+
+    if set(prompt_template.input_variables) != REQUIRED_TEMPLATE_VARIABLES:
+        raise _invalid_prompt_definition(
+            path, "template must use only '{locale_instruction}'"
+        )
+
+    return prompt_template, max_tokens
+
+
+def load_generation_profiles(
+    directory: Path = PROMPT_TEMPLATE_DIRECTORY,
+) -> Dict[str, Tuple[PromptTemplate, int]]:
+    return {
+        mode: load_prompt_definition(directory / filename)
+        for mode, filename in PROMPT_FILES.items()
+    }
+
+
+GENERATION_PROFILES = load_generation_profiles()
+WORD_PROMPT_TEMPLATE, MAX_WORD_TOKENS = GENERATION_PROFILES["word"]
+TEXT_PROMPT_TEMPLATE, MAX_TEXT_TOKENS = GENERATION_PROFILES["text"]
+PATH_PROMPT_TEMPLATE, MAX_PATH_TOKENS = GENERATION_PROFILES["path"]
 
 
 def normalize_locale(locale: object) -> str:
