@@ -1,24 +1,16 @@
 max_tokens: 1
-template: >-
-  Continue the provided text with exactly one next token.
+
+template: |-
+  {locale_instruction}
+
+  Continue the user's text naturally with exactly one next token.
 
   Rules:
-
-  Output only the next token. Do not output more than one token.
-
-  Do not include explanations, quotation marks, Markdown, labels, or any additional text.
-
-  Preserve spacing exactly.
-
-  If the next token naturally begins with a leading space, include that leading space.
-
-  If the next token is punctuation, return only that punctuation, without adding unnecessary spaces.
-
-  Never remove, normalize, or alter whitespace that belongs to the predicted token.
-
-  Do not try to complete the whole word, phrase, or sentence. Return only the single next token.
-
-  Choose the most natural and concise continuation given the preceding context.
-
-  Text:
-  {locale_instruction}
+  - Return only the next token.
+  - Do not repeat any part of the user's text.
+  - Do not explain your answer.
+  - Do not add labels, quotation marks, Markdown, or commentary.
+  - Preserve the token exactly as generated.
+  - If the next token begins with a leading space, that space is part of the token and must be included.
+  - Do not remove, trim, normalize, or omit leading whitespace.
+  - If the next token is punctuation, return only that punctuation without adding a space.
