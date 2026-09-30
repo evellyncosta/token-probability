@@ -1,8 +1,10 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, redirect, url_for
 from flask_cors import CORS
 import os
 import math
 import re
+import time
+import uuid
 from typing import Dict, List, Tuple
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
@@ -14,7 +16,7 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 MODEL_NAME = "gpt-4o-mini"
-SYSTEM_PROMPT = (
+WORD_SYSTEM_PROMPT = (
     "You are a next-word predictor. Given the user's text context, return "
     "exactly one lexical word that naturally continues it. Return only the "
     "word, with no punctuation, quotation marks, markdown, explanation, or "
@@ -22,11 +24,64 @@ SYSTEM_PROMPT = (
     "include one leading space needed to continue it."
 )
 MAX_WORD_TOKENS = 16
+TEXT_SYSTEM_PROMPT = (
+    "Answer the user's request in plain text only. Do not use Markdown, headings, "
+    "lists, code fences, or inline formatting. Paragraphs are allowed when useful. "
+    "Aim for a complete answer of no more than 500 characters."
+)
+MAX_TEXT_TOKENS = 256
+PATH_SYSTEM_PROMPT = (
+    "Continue the user's text with the next token only. Preserve natural text and "
+    "pay attention to the ponctuation and conciseness of the text, do not forget to answer with space if necessary "
+    "spacing exactly: when the next token begins a new word after a word or "
+    "sentence-ending punctuation, include the required leading whitespace in that "
+    "token. Do not join lexical words together. Keep punctuation attached only when "
+    "it naturally follows the preceding text. Return no explanation, quotation "
+    "marks, Markdown, or additional tokens."
+)
+MAX_PATH_TOKENS = 1
+DEFAULT_LOCALE = "pt-BR"
+SUPPORTED_LOCALES = {"pt-BR", "en"}
+LOCALE_INSTRUCTIONS = {
+    "pt-BR": "Respond in Brazilian Portuguese.",
+    "en": "Respond in English.",
+}
 WORD_PATTERN = re.compile(r"[^\W\d_]+(?:[-'][^\W\d_]+)*$", re.UNICODE)
+MARKDOWN_PATTERNS = (
+    re.compile(r"```"),
+    re.compile(r"(?m)^\s{0,3}#{1,6}\s+"),
+    re.compile(r"(?m)^\s*(?:[-*+]\s+|\d+[.)]\s+)"),
+    re.compile(r"(?m)^\s*>\s?"),
+    re.compile(r"(?:\*\*|__|`|\[[^\]]+\]\([^)]*\))"),
+)
+VALUE_ERROR_CODES = {
+    "Request body must be a JSON object": "request_body_invalid",
+    "Generation mode must be a string.": "generation_mode_invalid",
+    "Generation mode must be 'word', 'text', or 'path'.": "generation_mode_invalid",
+    "Generation settings must be numeric.": "generation_settings_invalid",
+    "top_k must be between 0 and 20.": "generation_settings_invalid",
+    "temperature must be between 0 and 2.": "generation_settings_invalid",
+    "Prompt is required": "prompt_missing",
+}
+RUNTIME_ERROR_CODES = {
+    "OpenAI API key is not configured on the server.": "openai_api_key_not_configured",
+    "No official tokenizer encoding is configured for the selected OpenAI model.": (
+        "tokenizer_configuration_unsupported"
+    ),
+    "OpenAI did not return token probabilities.": "token_probabilities_missing",
+    "OpenAI did not return a valid next word.": "generated_word_invalid",
+    "OpenAI did not return a valid text response.": "generated_text_invalid",
+    "OpenAI did not return plain text.": "plain_text_invalid",
+    "OpenAI did not return a valid next token.": "generated_token_invalid",
+}
 
 
 def get_model_response(
-    prompt: str, top_k: int = 5, temperature: float = 0.0
+    prompt: str,
+    top_k: int = 5,
+    temperature: float = 0.0,
+    mode: str = "word",
+    locale: str = DEFAULT_LOCALE,
 ) -> Tuple[str, List[Dict], List[Dict]]:
     """
     Returns:
@@ -45,16 +100,17 @@ def get_model_response(
 
     prompt_tokens = tokenize_prompt(prompt)
 
+    system_prompt, max_tokens = get_generation_profile(mode, locale)
     model = ChatOpenAI(
         model=MODEL_NAME,
         temperature=temperature,
-        max_tokens=MAX_WORD_TOKENS,
+        max_tokens=max_tokens,
         logprobs=True,
         top_logprobs=top_k,
     )
     response = model.invoke(
         [
-            {"role": "developer", "content": SYSTEM_PROMPT},
+            {"role": "developer", "content": system_prompt},
             {"role": "user", "content": prompt},
         ]
     )
@@ -83,8 +139,23 @@ def get_model_response(
             "top_logprobs": top_items
         })
 
-    validate_next_word(response_text, token_probs)
+    validate_response(response_text, token_probs, mode)
     return response_text, token_probs, prompt_tokens
+
+
+def normalize_locale(locale: object) -> str:
+    return locale if isinstance(locale, str) and locale in SUPPORTED_LOCALES else DEFAULT_LOCALE
+
+
+def get_generation_profile(mode: str, locale: str = DEFAULT_LOCALE) -> Tuple[str, int]:
+    locale_instruction = LOCALE_INSTRUCTIONS[normalize_locale(locale)]
+    if mode == "word":
+        return f"{WORD_SYSTEM_PROMPT} {locale_instruction}", MAX_WORD_TOKENS
+    if mode == "text":
+        return f"{TEXT_SYSTEM_PROMPT} {locale_instruction}", MAX_TEXT_TOKENS
+    if mode == "path":
+        return f"{PATH_SYSTEM_PROMPT} {locale_instruction}", MAX_PATH_TOKENS
+    raise ValueError("Generation mode must be 'word', 'text', or 'path'.")
 
 
 def tokenize_prompt(prompt: str) -> List[Dict]:
@@ -117,6 +188,38 @@ def validate_next_word(response_text: str, token_probs: List[Dict]) -> None:
         raise RuntimeError("OpenAI did not return a valid next word.")
 
 
+def validate_text_response(response_text: str, token_probs: List[Dict]) -> None:
+    """Keep text-output tokens faithful while rejecting Markdown formatting."""
+    raw_tokens = "".join(token["selected_token"] for token in token_probs)
+    if raw_tokens != response_text or not response_text.strip():
+        raise RuntimeError("OpenAI did not return a valid text response.")
+    if any(pattern.search(response_text) for pattern in MARKDOWN_PATTERNS):
+        raise RuntimeError("OpenAI did not return plain text.")
+
+
+def validate_next_token(response_text: str, token_probs: List[Dict]) -> None:
+    """Accept exactly one faithful provider token, including whitespace or punctuation."""
+    if (
+        len(token_probs) != 1
+        or not response_text
+        or token_probs[0]["selected_token"] != response_text
+    ):
+        raise RuntimeError("OpenAI did not return a valid next token.")
+
+
+def validate_response(response_text: str, token_probs: List[Dict], mode: str) -> None:
+    if mode == "word":
+        validate_next_word(response_text, token_probs)
+        return
+    if mode == "text":
+        validate_text_response(response_text, token_probs)
+        return
+    if mode == "path":
+        validate_next_token(response_text, token_probs)
+        return
+    raise ValueError("Generation mode must be 'word', 'text', or 'path'.")
+
+
 def get_generation_settings(data: Dict) -> Tuple[int, float]:
     try:
         top_k = int(data.get("top_k", 5))
@@ -131,37 +234,185 @@ def get_generation_settings(data: Dict) -> Tuple[int, float]:
 
     return top_k, temperature
 
+
+def get_generation_locale(data: Dict) -> str:
+    return normalize_locale(data.get("locale"))
+
+
+def get_generation_error_code(error: Exception) -> str:
+    """Classify known application failures without exposing exception text in logs."""
+    if isinstance(error, ValueError):
+        return VALUE_ERROR_CODES.get(str(error), "request_invalid")
+    if isinstance(error, RuntimeError):
+        return RUNTIME_ERROR_CODES.get(str(error), "runtime_error")
+    return "unexpected_exception"
+
+
+def log_generation_outcome(
+    *,
+    request_id: str,
+    status: int,
+    outcome: str,
+    mode: str,
+    locale: str,
+    top_k: object,
+    temperature: object,
+    started_at: float,
+    error: Exception | None = None,
+    include_traceback: bool = False,
+) -> None:
+    """Log approved generation metadata without request, response, or error content."""
+    duration_ms = round((time.perf_counter() - started_at) * 1000)
+    context = (
+        "generation_request outcome=%s request_id=%s status=%s error_code=%s "
+        "exception_type=%s mode=%s locale=%s top_k=%s temperature=%s duration_ms=%s"
+    )
+    values = (
+        outcome,
+        request_id,
+        status,
+        get_generation_error_code(error) if error else "none",
+        type(error).__name__ if error else "none",
+        mode,
+        locale,
+        top_k,
+        temperature,
+        duration_ms,
+    )
+
+    if include_traceback:
+        # Keep the traceback but replace the original exception instance, whose
+        # message can contain provider data or credentials.
+        app.logger.error(
+            context,
+            *values,
+            exc_info=(Exception, Exception(), error.__traceback__),
+        )
+    elif error:
+        log_method = app.logger.warning if status < 500 else app.logger.error
+        log_method(context, *values)
+    else:
+        app.logger.info(context, *values)
+
+
+def generation_error_response(message: str, status: int, request_id: str):
+    response = jsonify({"error": message})
+    response.status_code = status
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
 @app.route('/')
 def index():
     return render_template('index.html')
 
+
+@app.route('/tokens')
+def token_visualizer():
+    return render_template('tokens.html')
+
+
+@app.route('/phrase')
+def phrase_visualizer():
+    return redirect(url_for('text_visualizer'))
+
+
+@app.route('/text')
+def text_visualizer():
+    return render_template('text.html')
+
+
+@app.route('/hallucination-path')
+def hallucination_path():
+    return render_template('hallucination-path.html')
+
+
 @app.route('/api/generate', methods=['POST'])
 def generate():
+    request_id = str(uuid.uuid4())
+    started_at = time.perf_counter()
+    mode = "unknown"
+    locale = DEFAULT_LOCALE
+    top_k = None
+    temperature = None
+
     try:
         data = request.get_json(silent=True) or {}
         if not isinstance(data, dict):
-            return jsonify({'error': 'Request body must be a JSON object'}), 400
+            raise ValueError("Request body must be a JSON object")
 
         prompt = data.get('prompt', '')
+        requested_mode = data.get('mode', 'word')
+        if not isinstance(requested_mode, str):
+            raise ValueError("Generation mode must be a string.")
+        mode = requested_mode if requested_mode in {"word", "text", "path"} else "invalid"
         top_k, temperature = get_generation_settings(data)
+        locale = get_generation_locale(data)
         
         if not prompt:
-            return jsonify({'error': 'Prompt is required'}), 400
+            raise ValueError("Prompt is required")
             
-        response_text, token_probs, prompt_tokens = get_model_response(prompt, top_k, temperature)
+        response_text, token_probs, prompt_tokens = get_model_response(
+            prompt, top_k, temperature, requested_mode, locale
+        )
         
-        return jsonify({
+        response = jsonify({
             'text': response_text,
             'tokenProbs': token_probs,
             'promptTokens': prompt_tokens,
         })
+        log_generation_outcome(
+            request_id=request_id,
+            status=200,
+            outcome="success",
+            mode=mode,
+            locale=locale,
+            top_k=top_k,
+            temperature=temperature,
+            started_at=started_at,
+        )
+        return response
         
     except ValueError as error:
-        return jsonify({'error': str(error)}), 400
+        log_generation_outcome(
+            request_id=request_id,
+            status=400,
+            outcome="handled_error",
+            mode=mode,
+            locale=locale,
+            top_k=top_k,
+            temperature=temperature,
+            started_at=started_at,
+            error=error,
+        )
+        return generation_error_response(str(error), 400, request_id)
     except RuntimeError as error:
-        return jsonify({'error': str(error)}), 500
-    except Exception:
-        return jsonify({'error': 'OpenAI generation request failed.'}), 502
+        log_generation_outcome(
+            request_id=request_id,
+            status=500,
+            outcome="handled_error",
+            mode=mode,
+            locale=locale,
+            top_k=top_k,
+            temperature=temperature,
+            started_at=started_at,
+            error=error,
+        )
+        return generation_error_response(str(error), 500, request_id)
+    except Exception as error:
+        log_generation_outcome(
+            request_id=request_id,
+            status=502,
+            outcome="unexpected_error",
+            mode=mode,
+            locale=locale,
+            top_k=top_k,
+            temperature=temperature,
+            started_at=started_at,
+            error=error,
+            include_traceback=True,
+        )
+        return generation_error_response('OpenAI generation request failed.', 502, request_id)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

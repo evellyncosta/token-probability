@@ -7,7 +7,7 @@ A Flask web application and Jupyter notebook for visualizing LLM token probabili
 ## 🚀 Quick Start
 
 ### Live Demo (GitHub Pages)
-Visit the [live demo](https://marlenezw.github.io/token-probability) to see the token probability visualization in action with sample data.
+Visit the [live demo](https://marlenezw.github.io/token-probability) to choose a visualization mode and explore the static demonstration.
 
 ### Local Development (Full Functionality)
 For live token probability analysis with OpenAI:
@@ -45,6 +45,7 @@ For live token probability analysis with OpenAI:
 - **Live API Integration**: Connect to OpenAI for real-time token probability analysis
 - **Responsive Design**: Works on desktop and mobile devices
 - **Demo Mode**: GitHub Pages deployment with sample data for demonstration
+- **Mode Selection**: Start at a home page and choose token visualization or complete-text visualization
 
 ## 🛠️ How It Works
 
@@ -53,6 +54,8 @@ For live token probability analysis with OpenAI:
 - Real-time API calls to OpenAI using server-side environment configuration
 - Live token probability analysis
 - Complete interactivity
+
+Open `http://localhost:5000` to select a mode. `Visualizar token` opens with no example context or generated result; enter a context to begin. `Visualizar texto` accepts a question or instruction and shows the complete plain-text response token by token; paragraphs are allowed and Markdown is not.
 
 The visualizer predicts one next word at a time. A word is not necessarily one token: select each displayed token to see the alternatives the model considered at that step. The table shows only the top candidates, so their probabilities do not necessarily sum to 100%.
 
@@ -69,7 +72,9 @@ The context is tokenized on the server using the official tokenizer encoding res
 ```
 ├── app.py                 # Flask application
 ├── templates/
-│   └── index.html        # Main HTML template
+│   ├── index.html        # Mode-selection page
+│   ├── tokens.html       # Token visualizer
+│   └── text.html         # Complete-text visualizer
 ├── static/
 │   ├── style.css         # Styles
 │   ├── script.js         # Original JavaScript (for local)
