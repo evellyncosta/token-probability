@@ -146,6 +146,7 @@ body {
 #path-start-btn:disabled, .secondary-button:disabled { cursor: not-allowed; opacity: 0.6; }
 .path-workspace { display: grid; gap: 20px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .active-path-text { color: #e2e8f0; margin: 10px 0 16px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.path-context-label { color: #c4b5fd; font-size: 0.9rem; margin-top: 14px; }
 .secondary-button { background: #16213e; border: 1px solid #667eea; color: #ddd6fe; padding: 9px 12px; }
 .path-status { color: #f6ad55; font-size: 0.9rem; margin-top: 10px; }
 .path-candidates { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; min-height: 42px; }

@@ -1,72 +1,72 @@
 (() => {
-    const state = { nodes: new Map(), activeNodeId: null, nextId: 0 };
+    const state = { nodes: new Map(), activeNodeId: null, nextId: 0, loading: false };
     const isStaticDemo = document.body.dataset.staticDemo === 'true';
     const input = document.getElementById('path-prompt-input');
     const startButton = document.getElementById('path-start-btn');
     const finishButton = document.getElementById('finish-path-btn');
     const candidatesElement = document.getElementById('path-candidates');
     const treeElement = document.getElementById('path-tree');
-    const activePathElement = document.getElementById('active-path-text');
+    const activePremiseLabelElement = document.getElementById('active-premise-label');
+    const activePremiseElement = document.getElementById('active-premise-text');
+    const activeResponseLabelElement = document.getElementById('active-response-label');
+    const activeResponseElement = document.getElementById('active-response-text');
     const statusElement = document.getElementById('path-status');
 
-    function t(key) {
-        return window.i18n.t(key);
-    }
+    const staticInitialSegment = [
+        { selected_token: ' it', selected_prob: 0.72, top_logprobs: [{ token: ' it', probability: 0.72 }, { token: ' Sydney', probability: 0.15 }, { token: ' the', probability: 0.08 }] },
+        { selected_token: ' was', selected_prob: 0.68, top_logprobs: [{ token: ' was', probability: 0.68 }, { token: ' became', probability: 0.18 }, { token: ' is', probability: 0.09 }] },
+        { selected_token: ' once', selected_prob: 0.61, top_logprobs: [{ token: ' once', probability: 0.61 }, { token: ' originally', probability: 0.21 }, { token: ' historically', probability: 0.12 }] },
+    ];
+    const staticBranchSegment = [
+        { selected_token: ' became', selected_prob: 0.66, top_logprobs: [{ token: ' became', probability: 0.66 }, { token: ' grew', probability: 0.19 }, { token: ' remained', probability: 0.1 }] },
+        { selected_token: ' a', selected_prob: 0.75, top_logprobs: [{ token: ' a', probability: 0.75 }, { token: ' the', probability: 0.18 }, { token: ' an', probability: 0.04 }] },
+        { selected_token: ' major', selected_prob: 0.7, top_logprobs: [{ token: ' major', probability: 0.7 }, { token: ' prominent', probability: 0.17 }, { token: ' well-known', probability: 0.08 }] },
+    ];
 
-    function formatToken(token) {
-        return token.replace(/ /g, '␠').replace(/\n/g, '↵').replace(/\t/g, '⇥');
-    }
+    const t = (key) => window.i18n.t(key);
+    const formatToken = (token) => token.replace(/ /g, '␠').replace(/\n/g, '↵').replace(/\t/g, '⇥');
 
-    function createNode({ parentId = null, token = '', probability = null, context, candidates = [] }) {
+    function createNode({ parentId = null, token = '', probability = null, context, responsePrefix = '', segment = [], nextIndex = 0 }) {
         const id = `path-node-${state.nextId++}`;
-        const node = { id, parentId, token, probability, context, candidates, children: [] };
+        const node = { id, parentId, token, probability, context, responsePrefix, segment, nextIndex, children: [] };
         state.nodes.set(id, node);
         if (parentId) state.nodes.get(parentId).children.push(id);
         return node;
     }
 
-    function activeNode() {
-        return state.nodes.get(state.activeNodeId);
-    }
+    const activeNode = () => state.nodes.get(state.activeNodeId);
+    const rootNode = () => [...state.nodes.values()].find((node) => node.parentId === null);
+    const currentTokenData = (node) => node?.segment[node.nextIndex] || null;
 
     function candidateChoices(tokenData) {
         const candidates = [...(tokenData.top_logprobs || [])];
         if (!candidates.some((candidate) => candidate.token === tokenData.selected_token)) {
             candidates.unshift({ token: tokenData.selected_token, probability: tokenData.selected_prob });
         }
-        return candidates.filter((candidate, index, all) => (
-            all.findIndex((other) => other.token === candidate.token) === index
-        ));
-    }
-
-    function activePath() {
-        const nodes = [];
-        let node = activeNode();
-        while (node) {
-            nodes.unshift(node);
-            node = node.parentId ? state.nodes.get(node.parentId) : null;
-        }
-        return nodes;
+        return candidates.filter((candidate, index, all) => all.findIndex((other) => other.token === candidate.token) === index);
     }
 
     function renderActivePath() {
         const node = activeNode();
-        activePathElement.textContent = node ? node.context : t('pathEmpty');
+        const root = rootNode();
+        activePremiseLabelElement.textContent = t('pathPremise');
+        activeResponseLabelElement.textContent = t('assistantResponse');
+        activePremiseElement.textContent = root ? root.context : t('pathEmpty');
+        activeResponseElement.textContent = node?.responsePrefix || t('pathResponseEmpty');
         finishButton.disabled = !node;
     }
 
     function renderCandidates() {
         candidatesElement.innerHTML = '';
-        const node = activeNode();
-        if (!node || !node.candidates.length) {
-            if (node) candidatesElement.textContent = t('noCandidates');
+        const tokenData = currentTokenData(activeNode());
+        if (!tokenData) {
+            if (activeNode() && !state.loading) candidatesElement.textContent = t('pathComplete');
             return;
         }
-        node.candidates.forEach((candidate) => {
+        candidateChoices(tokenData).forEach((candidate) => {
             const button = document.createElement('button');
             button.type = 'button';
             button.className = 'path-candidate';
-            button.innerHTML = '';
             const token = document.createElement('span');
             token.className = 'path-candidate-token';
             token.textContent = formatToken(candidate.token);
@@ -124,51 +124,39 @@
     }
 
     function setLoading(isLoading) {
+        state.loading = isLoading;
         startButton.disabled = isLoading;
         candidatesElement.classList.toggle('path-candidates-loading', isLoading);
         if (isLoading) candidatesElement.textContent = t('loadingChoices');
     }
 
-    async function requestCandidates(context) {
-        if (isStaticDemo) {
-            return {
-                selected_token: ' it', selected_prob: 0.72,
-                top_logprobs: [
-                    { token: ' it', probability: 0.72 },
-                    { token: ' Sydney', probability: 0.15 },
-                    { token: ' the', probability: 0.08 },
-                ],
-            };
-        }
+    async function requestSegment(premise, responsePrefix) {
+        if (isStaticDemo) return responsePrefix ? staticBranchSegment : staticInitialSegment;
         const response = await fetch('/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                prompt: context,
-                top_k: 5,
-                temperature: 0.0,
-                mode: 'path',
-                locale: window.i18n.getLocale(),
-            }),
+            body: JSON.stringify({ prompt: premise, response_prefix: responsePrefix, top_k: 5, temperature: 0.0, mode: 'path', locale: window.i18n.getLocale() }),
         });
-        if (!response.ok) throw new Error('Could not generate next-token candidates.');
+        if (!response.ok) throw new Error('Could not generate path candidates.');
         const data = await response.json();
-        if (!data.tokenProbs || data.tokenProbs.length !== 1) {
-            throw new Error('The next-token response was invalid.');
-        }
-        return data.tokenProbs[0];
+        if (!Array.isArray(data.tokenProbs) || !data.tokenProbs.length) throw new Error('The path response was invalid.');
+        return data.tokenProbs;
     }
 
-    async function loadCandidates(node) {
+    async function loadSegment(node) {
         setLoading(true);
         statusElement.textContent = '';
         try {
-            node.candidates = candidateChoices(await requestCandidates(node.context));
-            render();
+            const root = rootNode();
+            node.segment = await requestSegment(root.context, node.responsePrefix);
+            node.nextIndex = 0;
+            if (state.activeNodeId === node.id) render();
         } catch (error) {
-            node.candidates = [];
-            candidatesElement.textContent = t('noCandidates');
-            statusElement.textContent = t('generationError');
+            node.segment = [];
+            if (state.activeNodeId === node.id) {
+                candidatesElement.textContent = t('noCandidates');
+                statusElement.textContent = t('generationError');
+            }
             console.error(error);
         } finally {
             setLoading(false);
@@ -188,21 +176,26 @@
         state.activeNodeId = root.id;
         input.disabled = true;
         render();
-        await loadCandidates(root);
+        await loadSegment(root);
     }
 
     async function chooseCandidate(candidate) {
         const parent = activeNode();
-        if (!parent) return;
+        const tokenData = currentTokenData(parent);
+        if (!parent || !tokenData || state.loading) return;
+        const isOriginalChoice = candidate.token === tokenData.selected_token;
         const child = createNode({
             parentId: parent.id,
             token: candidate.token,
             probability: candidate.probability,
             context: parent.context + candidate.token,
+            responsePrefix: parent.responsePrefix + candidate.token,
+            segment: isOriginalChoice ? parent.segment : [],
+            nextIndex: isOriginalChoice ? parent.nextIndex + 1 : 0,
         });
         state.activeNodeId = child.id;
         render();
-        await loadCandidates(child);
+        if (!isOriginalChoice) await loadSegment(child);
     }
 
     function selectNode(nodeId) {
@@ -218,8 +211,6 @@
             startPath();
         }
     });
-    finishButton.addEventListener('click', () => {
-        statusElement.textContent = t('pathFinished');
-    });
+    finishButton.addEventListener('click', () => { statusElement.textContent = t('pathFinished'); });
     document.addEventListener('localechange', render);
 })();

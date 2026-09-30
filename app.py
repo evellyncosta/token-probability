@@ -17,7 +17,7 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-MODEL_NAME = "gpt-4o-mini"
+MODEL_NAME = "gpt-5-nano"
 WORD_PATTERN = re.compile(r"[^\W\d_]+(?:[-'][^\W\d_]+)*$", re.UNICODE)
 MARKDOWN_PATTERNS = (
     re.compile(r"```"),
@@ -34,6 +34,8 @@ VALUE_ERROR_CODES = {
     "top_k must be between 0 and 20.": "generation_settings_invalid",
     "temperature must be between 0 and 2.": "generation_settings_invalid",
     "Prompt is required": "prompt_missing",
+    "Path response prefix is only supported in path mode.": "path_response_prefix_invalid",
+    "Path response prefix must be a string.": "path_response_prefix_invalid",
 }
 RUNTIME_ERROR_CODES = {
     "OpenAI API key is not configured on the server.": "openai_api_key_not_configured",
@@ -44,7 +46,7 @@ RUNTIME_ERROR_CODES = {
     "OpenAI did not return a valid next word.": "generated_word_invalid",
     "OpenAI did not return a valid text response.": "generated_text_invalid",
     "OpenAI did not return plain text.": "plain_text_invalid",
-    "OpenAI did not return a valid next token.": "generated_token_invalid",
+    "OpenAI did not return a valid path continuation.": "generated_path_invalid",
 }
 
 
@@ -54,6 +56,7 @@ def get_model_response(
     temperature: float = 0.0,
     mode: str = "word",
     locale: str = DEFAULT_LOCALE,
+    assistant_prefix: str = "",
 ) -> Tuple[str, List[Dict], List[Dict]]:
     """
     Returns:
@@ -80,12 +83,12 @@ def get_model_response(
         logprobs=True,
         top_logprobs=top_k,
     )
-    response = model.invoke(
-        [
-            {"role": "developer", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ]
-    )
+    path_context = prompt + assistant_prefix if mode == "path" else prompt
+    messages = [
+        {"role": "developer", "content": system_prompt},
+        {"role": "user", "content": path_context},
+    ]
+    response = model.invoke(messages)
 
     response_text = response.content
     logprobs = response.response_metadata.get("logprobs")
@@ -154,14 +157,14 @@ def validate_text_response(response_text: str, token_probs: List[Dict]) -> None:
         raise RuntimeError("OpenAI did not return plain text.")
 
 
-def validate_next_token(response_text: str, token_probs: List[Dict]) -> None:
-    """Accept exactly one faithful provider token, including whitespace or punctuation."""
+def validate_path_continuation(response_text: str, token_probs: List[Dict]) -> None:
+    """Accept a faithful, non-empty provider token sequence for a path segment."""
     if (
-        len(token_probs) != 1
+        not token_probs
         or not response_text
-        or token_probs[0]["selected_token"] != response_text
+        or "".join(token["selected_token"] for token in token_probs) != response_text
     ):
-        raise RuntimeError("OpenAI did not return a valid next token.")
+        raise RuntimeError("OpenAI did not return a valid path continuation.")
 
 
 def validate_response(response_text: str, token_probs: List[Dict], mode: str) -> None:
@@ -172,7 +175,7 @@ def validate_response(response_text: str, token_probs: List[Dict], mode: str) ->
         validate_text_response(response_text, token_probs)
         return
     if mode == "path":
-        validate_next_token(response_text, token_probs)
+        validate_path_continuation(response_text, token_probs)
         return
     raise ValueError("Generation mode must be 'word', 'text', or 'path'.")
 
@@ -299,6 +302,7 @@ def generate():
             raise ValueError("Request body must be a JSON object")
 
         prompt = data.get('prompt', '')
+        assistant_prefix = data.get('response_prefix', '')
         requested_mode = data.get('mode', 'word')
         if not isinstance(requested_mode, str):
             raise ValueError("Generation mode must be a string.")
@@ -308,9 +312,13 @@ def generate():
         
         if not prompt:
             raise ValueError("Prompt is required")
+        if not isinstance(assistant_prefix, str):
+            raise ValueError("Path response prefix must be a string.")
+        if requested_mode != "path" and assistant_prefix:
+            raise ValueError("Path response prefix is only supported in path mode.")
             
         response_text, token_probs, prompt_tokens = get_model_response(
-            prompt, top_k, temperature, requested_mode, locale
+            prompt, top_k, temperature, requested_mode, locale, assistant_prefix
         )
         
         response = jsonify({

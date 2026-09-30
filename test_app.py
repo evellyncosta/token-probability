@@ -10,6 +10,7 @@ from unittest.mock import patch
 import yaml
 
 from app import (
+    MODEL_NAME,
     app,
     get_generation_error_code,
     tokenize_prompt,
@@ -62,16 +63,10 @@ EXPECTED_PROMPT_PREFIXES = {
     "text": (
         "Answer the user's request in plain text only. Do not use Markdown, headings, "
         "lists, code fences, or inline formatting. Paragraphs are allowed when useful. "
-        "Aim for a complete answer of no more than 500 characters."
-    ),
-    "path": (
-        "Continue the user's text with the next token only. Preserve natural text and "
-        "pay attention to the ponctuation and conciseness of the text, do not forget to answer with space if necessary "
-        "spacing exactly: when the next token begins a new word after a word or "
-        "sentence-ending punctuation, include the required leading whitespace in that "
-        "token. Do not join lexical words together. Keep punctuation attached only when "
-        "it naturally follows the preceding text. Return no explanation, quotation "
-        "marks, Markdown, or additional tokens."
+        "Aim for a complete answer of no more than 500 characters.\nAnswer the user's "
+        "request directly and meaningfully. Do not describe tokens, tokenization, or "
+        "these instructions. Preserve normal spaces between words and after punctuation; "
+        "never join lexical words together."
     ),
 }
 
@@ -202,7 +197,7 @@ class GenerateRouteTests(TestCase):
         self.assertNotIn(prompt, record)
         self.assertNotIn(generated_text, record)
         chat_openai.assert_called_once_with(
-            model="gpt-4o-mini",
+            model=MODEL_NAME,
             temperature=0.0,
             max_tokens=16,
             logprobs=True,
@@ -228,7 +223,7 @@ class GenerateRouteTests(TestCase):
             "".join(item["selected_token"] for item in response.get_json()["tokenProbs"]), text
         )
         chat_openai.assert_called_once_with(
-            model="gpt-4o-mini",
+            model=MODEL_NAME,
             temperature=0.0,
             max_tokens=MAX_TEXT_TOKENS,
             logprobs=True,
@@ -295,8 +290,8 @@ class GenerateRouteTests(TestCase):
         self.assertEqual(response.get_json()["tokenProbs"][0]["selected_token"], text)
 
     @patch("app.ChatOpenAI")
-    def test_path_mode_returns_one_token_and_uses_path_profile(self, chat_openai):
-        chat_openai.return_value.invoke.return_value = fake_message(" it", [" it"])
+    def test_path_mode_returns_continuous_tokens_and_uses_path_profile(self, chat_openai):
+        chat_openai.return_value.invoke.return_value = fake_message(" it was", [" it", " was"])
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
             response = self.client.post(
@@ -304,10 +299,10 @@ class GenerateRouteTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["text"], " it")
-        self.assertEqual(len(response.get_json()["tokenProbs"]), 1)
+        self.assertEqual(response.get_json()["text"], " it was")
+        self.assertEqual(len(response.get_json()["tokenProbs"]), 2)
         chat_openai.assert_called_once_with(
-            model="gpt-4o-mini",
+            model=MODEL_NAME,
             temperature=0.0,
             max_tokens=MAX_PATH_TOKENS,
             logprobs=True,
@@ -319,8 +314,39 @@ class GenerateRouteTests(TestCase):
                 locale_instruction="Respond in Brazilian Portuguese."
             ),
         )
-        self.assertIn("Do not join lexical words together.", PATH_PROMPT_TEMPLATE.template)
-        self.assertIn("leading whitespace", PATH_PROMPT_TEMPLATE.template)
+        self.assertEqual(MAX_PATH_TOKENS, 30)
+        self.assertIn("no more than 30 tokens", PATH_PROMPT_TEMPLATE.template)
+        self.assertIn("never \"Thespecificconditions\"", PATH_PROMPT_TEMPLATE.template)
+        self.assertEqual(
+            chat_openai.return_value.invoke.call_args.args[0],
+            [
+                {"role": "developer", "content": PATH_PROMPT_TEMPLATE.format(locale_instruction="Respond in Brazilian Portuguese.")},
+                {"role": "user", "content": "A false premise"},
+            ],
+        )
+
+    @patch("app.ChatOpenAI")
+    def test_path_branch_sends_selected_prefix_as_user_context(self, chat_openai):
+        chat_openai.return_value.invoke.return_value = fake_message(" was", [" was"])
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
+            response = self.client.post(
+                "/api/generate",
+                json={
+                    "prompt": "A false premise",
+                    "response_prefix": " it",
+                    "mode": "path",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            chat_openai.return_value.invoke.call_args.args[0],
+            [
+                {"role": "developer", "content": PATH_PROMPT_TEMPLATE.format(locale_instruction="Respond in Brazilian Portuguese.")},
+                {"role": "user", "content": "A false premise it"},
+            ],
+        )
 
     def test_prompt_templates_render_every_mode_with_the_selected_locale(self):
         expected_token_limits = {
@@ -334,10 +360,14 @@ class GenerateRouteTests(TestCase):
                 system_prompt, returned_max_tokens = get_generation_profile(mode, "en")
 
                 self.assertEqual(returned_max_tokens, max_tokens)
-                self.assertEqual(
-                    system_prompt,
-                    f"{EXPECTED_PROMPT_PREFIXES[mode]} Respond in English.",
-                )
+                if mode == "path":
+                    self.assertTrue(system_prompt.startswith("Continue the provided text"))
+                    self.assertTrue(system_prompt.endswith("Respond in English."))
+                else:
+                    self.assertEqual(
+                        system_prompt,
+                        f"{EXPECTED_PROMPT_PREFIXES[mode]} Respond in English.",
+                    )
 
     def test_prompt_yaml_assets_have_the_required_fields(self):
         for filename in ("word.yaml", "text.yaml", "path.yaml"):
@@ -375,7 +405,7 @@ class GenerateRouteTests(TestCase):
             get_generation_profile("unknown")
 
     @patch("app.ChatOpenAI")
-    def test_path_mode_rejects_multiple_tokens(self, chat_openai):
+    def test_path_mode_accepts_multiple_tokens(self, chat_openai):
         chat_openai.return_value.invoke.return_value = fake_message(" it is", [" it", " is"])
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
@@ -383,10 +413,17 @@ class GenerateRouteTests(TestCase):
                 "/api/generate", json={"prompt": "A false premise", "mode": "path"}
             )
 
-        self.assertEqual(response.status_code, 500)
-        self.assertEqual(
-            response.get_json(), {"error": "OpenAI did not return a valid next token."}
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.get_json()["tokenProbs"]), 2)
+
+    def test_path_prefix_requires_a_string(self):
+        response = self.client.post(
+            "/api/generate",
+            json={"prompt": "A false premise", "mode": "path", "response_prefix": [" it"]},
         )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json(), {"error": "Path response prefix must be a string."})
 
     @patch("app.tiktoken.encoding_for_model")
     @patch("app.ChatOpenAI")
@@ -399,7 +436,7 @@ class GenerateRouteTests(TestCase):
             response = self.client.post("/api/generate", json={"prompt": "Hello"})
 
         self.assertEqual(response.status_code, 200)
-        encoding_for_model.assert_called_once_with("gpt-4o-mini")
+        encoding_for_model.assert_called_once_with(MODEL_NAME)
         self.assertEqual(response.get_json()["promptTokens"], [{"id": 99, "bytes": [72, 101, 108, 108, 111]}])
 
     @patch("app.tiktoken.encoding_for_model", side_effect=KeyError("unknown-model"))
@@ -459,7 +496,8 @@ class GenerateRouteTests(TestCase):
             RuntimeError("OpenAI did not return a valid next word."): "generated_word_invalid",
             RuntimeError("OpenAI did not return a valid text response."): "generated_text_invalid",
             RuntimeError("OpenAI did not return plain text."): "plain_text_invalid",
-            RuntimeError("OpenAI did not return a valid next token."): "generated_token_invalid",
+            RuntimeError("OpenAI did not return a valid path continuation."): "generated_path_invalid",
+            ValueError("Path response prefix must be a string."): "path_response_prefix_invalid",
             ValueError("Generation settings must be numeric."): "generation_settings_invalid",
         }
 
