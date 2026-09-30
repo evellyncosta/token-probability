@@ -10,42 +10,14 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 import tiktoken
 
+from prompts import DEFAULT_LOCALE, get_generation_profile, normalize_locale
+
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 MODEL_NAME = "gpt-4o-mini"
-WORD_SYSTEM_PROMPT = (
-    "You are a next-word predictor. Given the user's text context, return "
-    "exactly one lexical word that naturally continues it. Return only the "
-    "word, with no punctuation, quotation marks, markdown, explanation, or "
-    "additional words. If the context does not end in whitespace, you may "
-    "include one leading space needed to continue it."
-)
-MAX_WORD_TOKENS = 16
-TEXT_SYSTEM_PROMPT = (
-    "Answer the user's request in plain text only. Do not use Markdown, headings, "
-    "lists, code fences, or inline formatting. Paragraphs are allowed when useful. "
-    "Aim for a complete answer of no more than 500 characters."
-)
-MAX_TEXT_TOKENS = 256
-PATH_SYSTEM_PROMPT = (
-    "Continue the user's text with the next token only. Preserve natural text and "
-    "pay attention to the ponctuation and conciseness of the text, do not forget to answer with space if necessary "
-    "spacing exactly: when the next token begins a new word after a word or "
-    "sentence-ending punctuation, include the required leading whitespace in that "
-    "token. Do not join lexical words together. Keep punctuation attached only when "
-    "it naturally follows the preceding text. Return no explanation, quotation "
-    "marks, Markdown, or additional tokens."
-)
-MAX_PATH_TOKENS = 1
-DEFAULT_LOCALE = "pt-BR"
-SUPPORTED_LOCALES = {"pt-BR", "en"}
-LOCALE_INSTRUCTIONS = {
-    "pt-BR": "Respond in Brazilian Portuguese.",
-    "en": "Respond in English.",
-}
 WORD_PATTERN = re.compile(r"[^\W\d_]+(?:[-'][^\W\d_]+)*$", re.UNICODE)
 MARKDOWN_PATTERNS = (
     re.compile(r"```"),
@@ -141,21 +113,6 @@ def get_model_response(
 
     validate_response(response_text, token_probs, mode)
     return response_text, token_probs, prompt_tokens
-
-
-def normalize_locale(locale: object) -> str:
-    return locale if isinstance(locale, str) and locale in SUPPORTED_LOCALES else DEFAULT_LOCALE
-
-
-def get_generation_profile(mode: str, locale: str = DEFAULT_LOCALE) -> Tuple[str, int]:
-    locale_instruction = LOCALE_INSTRUCTIONS[normalize_locale(locale)]
-    if mode == "word":
-        return f"{WORD_SYSTEM_PROMPT} {locale_instruction}", MAX_WORD_TOKENS
-    if mode == "text":
-        return f"{TEXT_SYSTEM_PROMPT} {locale_instruction}", MAX_TEXT_TOKENS
-    if mode == "path":
-        return f"{PATH_SYSTEM_PROMPT} {locale_instruction}", MAX_PATH_TOKENS
-    raise ValueError("Generation mode must be 'word', 'text', or 'path'.")
 
 
 def tokenize_prompt(prompt: str) -> List[Dict]:

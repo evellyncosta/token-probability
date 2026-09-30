@@ -5,15 +5,18 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from app import (
-    MAX_PATH_TOKENS,
-    MAX_TEXT_TOKENS,
-    PATH_SYSTEM_PROMPT,
-    TEXT_SYSTEM_PROMPT,
     app,
     get_generation_error_code,
+    tokenize_prompt,
+)
+from prompts import (
+    MAX_PATH_TOKENS,
+    MAX_TEXT_TOKENS,
+    MAX_WORD_TOKENS,
+    PATH_PROMPT_TEMPLATE,
+    TEXT_PROMPT_TEMPLATE,
     get_generation_profile,
     normalize_locale,
-    tokenize_prompt,
 )
 
 
@@ -201,7 +204,9 @@ class GenerateRouteTests(TestCase):
         )
         self.assertEqual(
             chat_openai.return_value.invoke.call_args.args[0][0]["content"],
-            f"{TEXT_SYSTEM_PROMPT} Respond in Brazilian Portuguese.",
+            TEXT_PROMPT_TEMPLATE.format(
+                locale_instruction="Respond in Brazilian Portuguese."
+            ),
         )
 
     @patch("app.ChatOpenAI")
@@ -278,10 +283,32 @@ class GenerateRouteTests(TestCase):
         )
         self.assertEqual(
             chat_openai.return_value.invoke.call_args.args[0][0]["content"],
-            f"{PATH_SYSTEM_PROMPT} Respond in Brazilian Portuguese.",
+            PATH_PROMPT_TEMPLATE.format(
+                locale_instruction="Respond in Brazilian Portuguese."
+            ),
         )
-        self.assertIn("Do not join lexical words together.", PATH_SYSTEM_PROMPT)
-        self.assertIn("leading whitespace", PATH_SYSTEM_PROMPT)
+        self.assertIn("Do not join lexical words together.", PATH_PROMPT_TEMPLATE.template)
+        self.assertIn("leading whitespace", PATH_PROMPT_TEMPLATE.template)
+
+    def test_prompt_templates_render_every_mode_with_the_selected_locale(self):
+        expected_token_limits = {
+            "word": MAX_WORD_TOKENS,
+            "text": MAX_TEXT_TOKENS,
+            "path": MAX_PATH_TOKENS,
+        }
+
+        for mode, max_tokens in expected_token_limits.items():
+            with self.subTest(mode=mode):
+                system_prompt, returned_max_tokens = get_generation_profile(mode, "en")
+
+                self.assertEqual(returned_max_tokens, max_tokens)
+                self.assertIn("Respond in English.", system_prompt)
+
+    def test_prompt_profile_rejects_an_unknown_mode(self):
+        with self.assertRaisesRegex(
+            ValueError, "Generation mode must be 'word', 'text', or 'path'."
+        ):
+            get_generation_profile("unknown")
 
     @patch("app.ChatOpenAI")
     def test_path_mode_rejects_multiple_tokens(self, chat_openai):
