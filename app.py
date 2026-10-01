@@ -17,7 +17,7 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-MODEL_NAME = "gpt-5-nano"
+MODEL_NAME = "gpt-5.4-nano"
 WORD_PATTERN = re.compile(r"[^\W\d_]+(?:[-'][^\W\d_]+)*$", re.UNICODE)
 MARKDOWN_PATTERNS = (
     re.compile(r"```"),
@@ -82,6 +82,7 @@ def get_model_response(
         max_tokens=max_tokens,
         logprobs=True,
         top_logprobs=top_k,
+        reasoning_effort="none",
     )
     path_context = prompt + assistant_prefix if mode == "path" else prompt
     messages = [
