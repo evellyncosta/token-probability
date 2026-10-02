@@ -19,7 +19,6 @@
     const verificationElement = document.getElementById('verification-result');
     const verificationTitleElement = document.getElementById('verification-title');
     const verificationReasonElement = document.getElementById('verification-reason');
-    const verificationClaimsElement = document.getElementById('verification-claims');
     const verificationSourcesElement = document.getElementById('verification-sources');
 
     const staticInitialSegment = [
@@ -67,7 +66,6 @@
     }
 
     function renderVerification() {
-        verificationClaimsElement.innerHTML = '';
         verificationSourcesElement.innerHTML = '';
         verifyButton.disabled = !state.finalSnapshot || state.verificationLoading;
         if (state.verificationLoading) {
@@ -86,19 +84,9 @@
             verificationElement.hidden = true;
             return;
         }
-        const titles = {
-            hallucination_found: 'verificationFound',
-            no_hallucination_found: 'verificationClear',
-            inconclusive: 'verificationInconclusive',
-        };
         verificationElement.hidden = false;
-        verificationTitleElement.textContent = t(titles[state.verification.status]);
-        verificationReasonElement.textContent = state.verification.reason;
-        state.verification.problematic_claims.forEach((claim) => {
-            const item = document.createElement('li');
-            item.textContent = claim;
-            verificationClaimsElement.appendChild(item);
-        });
+        verificationTitleElement.textContent = t('verificationResult');
+        verificationReasonElement.textContent = state.verification.message;
         (state.verification.sources || []).forEach((source) => {
             const item = document.createElement('li');
             const link = document.createElement('a');
@@ -289,9 +277,7 @@
         try {
             if (isStaticDemo) {
                 state.verification = {
-                    status: 'hallucination_found',
-                    reason: 'A continuação apresenta uma explicação factual que precisa de verificação.',
-                    problematic_claims: ['A explicação apresentada não foi confirmada por fontes externas.'],
+                    message: 'A continuação apresenta uma explicação factual que precisa de verificação por fontes externas.',
                     sources: [{ title: 'NASA: The Moon Illusion', url: 'https://science.nasa.gov/solar-system/moon/the-moon-illusion-why-does-the-moon-look-so-big-sometimes/', relation: 'contradicts', retrieved_at: '2026-10-02' }],
                 };
             } else {
@@ -302,6 +288,9 @@
                 });
                 if (!response.ok) throw new Error('Could not verify the path response.');
                 state.verification = await response.json();
+                if (typeof state.verification.message !== 'string' || !state.verification.message.trim()) {
+                    throw new Error('The verification response was invalid.');
+                }
             }
         } catch (error) {
             state.verification = null;

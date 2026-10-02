@@ -54,25 +54,24 @@ Separar busca e julgamento em chamadas distintas também foi descartado: uma
 execução agentiva permite que o avaliador refine a pesquisa enquanto raciocina
 sobre a evidência e mantém o vínculo entre fontes e veredito.
 
-### Contrato estruturado e proveniência das fontes
+### Mensagem textual e proveniência das fontes
 
-O avaliador retornará JSON estrito com `status`, `reason` e
-`problematic_claims`; o servidor extrairá citações URL da resposta e as anexará
-como `sources`. A validação aceitará somente os três status conhecidos, motivo
-não vazio, lista de strings válida e alegações problemáticas apenas para
-`hallucination_found`. Ausência de fontes, evidência insuficiente ou incapacidade
-de sustentar um veredito produzirá `inconclusive`, nunca uma aprovação factual.
+O avaliador retornará sua mensagem textual normal. O servidor a encaminhará como
+`message` e extrairá citações URL da resposta para anexá-las como `sources`.
+Ausência de fontes ou evidência insuficiente não será convertida em um estado
+determinístico; o prompt orientará o agente a explicar a limitação na mensagem.
 
-O cliente renderizará títulos, motivo, alegações e links usando texto seguro,
+sem inserir HTML retornado pelo modelo.
+O cliente renderizará a mensagem e links usando texto seguro, sem inserir HTML
+retornado pelo modelo.
 sem inserir HTML retornado pelo modelo.
 
 ### Compatibilidade e falhas
 
 `POST /api/verify-hallucination` conserva o payload de entrada `{prompt,
-response, locale}` e o contrato de saída, com a adição obrigatória de fontes
-quando disponíveis. Falhas de provedor, parsing ou contrato permanecem erros
-seguros; logs mantêm metadados da solicitação e nunca a premissa, a resposta ou
-conteúdo de fontes.
+response, locale}` e devolve `{message, sources}`. Falhas de provedor permanecem
+erros seguros; logs mantêm metadados da solicitação e nunca a premissa, a
+resposta ou conteúdo de fontes.
 
 ## Risks / Trade-offs
 
@@ -82,7 +81,7 @@ conteúdo de fontes.
   por fontes primárias/autoridade e usar `inconclusive` quando não sustentarem o
   veredito.
 - [O modelo avaliador não chama a ferramenta apesar da configuração] → exigir
-  `tool_choice` e tratar ausência de evidência retornada como `inconclusive`.
+  `tool_choice` e orientar uma resposta transparente sobre a falta de fontes.
 - [O snapshot final pode divergir do ramo exibido] → armazenar e enviar o texto
   no momento da finalização, nunca reconstruí-lo de uma árvore posteriormente
   editável.

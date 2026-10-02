@@ -39,7 +39,6 @@ const elements = new Map([
     ['verification-result', new Element()],
     ['verification-title', new Element()],
     ['verification-reason', new Element()],
-    ['verification-claims', new Element()],
     ['verification-sources', new Element()],
 ]);
 global.document = {
@@ -62,7 +61,7 @@ global.fetch = async (_url, options) => {
     const payload = JSON.parse(options.body);
     calls.push(payload);
     if (_url === '/api/verify-hallucination') {
-        return { ok: true, json: async () => ({ status: 'hallucination_found', reason: 'Incorrect factual claim.', problematic_claims: ['Incorrect claim'] }) };
+        return { ok: true, json: async () => ({ message: 'The factual claim is not supported by the available sources.', sources: [] }) };
     }
     return {
         ok: true,
@@ -103,7 +102,8 @@ async function clickCandidate(index) {
     await elements.get('verify-hallucination-btn').events.click();
     assert.equal(calls.at(-1).prompt, 'False premise');
     assert.equal(calls.at(-1).response, ' A B');
-    assert.equal(elements.get('verification-title').textContent, 'verificationFound');
+    assert.equal(elements.get('verification-title').textContent, 'verificationResult');
+    assert.equal(elements.get('verification-reason').textContent, 'The factual claim is not supported by the available sources.');
 })().catch((error) => {
     console.error(error);
     process.exitCode = 1;

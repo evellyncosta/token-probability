@@ -34,10 +34,10 @@ desabilitada antes da finalização e habilitá-la somente após a pessoa finali
 o caminho. Somente o acionamento explícito dessa ação SHALL enviar a afirmação
 inicial e a resposta final imutável a um modelo avaliador distinto do modelo de
 geração. O modelo avaliador SHALL usar reasoning e consultar fontes externas
-por pesquisa web antes de devolver um resultado estruturado com um dos estados
-`hallucination_found`, `no_hallucination_found` ou `inconclusive`, um motivo,
-alegações problemáticas quando aplicável e as fontes consultadas. O sistema
-SHALL exibir o resultado e fontes clicáveis sem modificar o caminho finalizado.
+por pesquisa web antes de devolver uma mensagem textual de avaliação e as fontes
+consultadas. O sistema SHALL exibir a mensagem e fontes clicáveis sem modificar
+o caminho finalizado, sem tentar classificar deterministicamente se houve
+alucinação.
 
 #### Scenario: Seção antes da finalização
 - **WHEN** a exploração ainda não foi finalizada
@@ -53,13 +53,14 @@ SHALL exibir o resultado e fontes clicáveis sem modificar o caminho finalizado.
 - **WHEN** a pessoa finaliza a exploração e aciona a verificação manual
 - **THEN** o sistema SHALL enviar a afirmação inicial e a resposta concluída ao
   modelo avaliador distinto, SHALL exigir pesquisa web com reasoning e SHALL
-  exibir o veredito, motivo, alegações problemáticas e fontes devolvidas
+  exibir a mensagem textual e fontes devolvidas
 
 #### Scenario: Evidência insuficiente
 - **WHEN** a pesquisa externa não produz evidências suficientes para avaliar as
   alegações verificáveis da resposta
-- **THEN** o sistema SHALL exibir o estado `inconclusive` e SHALL evitar afirmar
-  que a resposta é factual ou não contém alucinação
+- **THEN** o sistema SHALL exibir uma mensagem que explique a limitação da
+  evidência e SHALL evitar afirmar deterministicamente que houve ou não houve
+  alucinação
 
 #### Scenario: Falha ao verificar
 - **WHEN** a solicitação de verificação falha ou devolve um resultado inválido

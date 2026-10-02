@@ -146,13 +146,9 @@ class GenerateRouteTests(TestCase):
 
     @patch("app.OpenAI")
     def test_verification_uses_reasoning_web_search_with_a_separate_model(self, openai):
-        result = {
-            "status": "hallucination_found",
-            "reason": "Atmospheric refraction does not explain the moon illusion.",
-            "problematic_claims": ["Atmospheric refraction causes the apparent enlargement."],
-        }
+        message = "Atmospheric refraction does not explain the moon illusion."
         openai.return_value.responses.create.return_value = SimpleNamespace(
-            output_text=__import__("json").dumps(result),
+            output_text=message,
             output=[SimpleNamespace(content=[SimpleNamespace(annotations=[SimpleNamespace(title="NASA", url="https://nasa.gov")])])],
         )
         prompt = "Why does the moon look larger on the horizon?"
@@ -161,7 +157,7 @@ class GenerateRouteTests(TestCase):
             response = self.client.post("/api/verify-hallucination", json={"prompt": prompt, "response": answer})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json(), {**result, "sources": [{"title": "NASA", "url": "https://nasa.gov", "relation": "contradicts", "retrieved_at": "2026-10-02"}]})
+        self.assertEqual(response.get_json(), {"message": message, "sources": [{"title": "NASA", "url": "https://nasa.gov", "relation": "evidence", "retrieved_at": "2026-10-02"}]})
         openai.return_value.responses.create.assert_called_once_with(
             model=VERIFICATION_MODEL_NAME,
             tools=[{"type": "web_search"}],
@@ -174,26 +170,22 @@ class GenerateRouteTests(TestCase):
         )
 
     @patch("app.OpenAI")
-    def test_verification_rejects_invalid_provider_json_without_a_verdict(self, openai):
+    def test_verification_rejects_an_empty_provider_message(self, openai):
         openai.return_value.responses.create.return_value = SimpleNamespace(
-            output_text='{"status":"no_hallucination_found"}',
+            output_text="",
             output=[SimpleNamespace(content=[SimpleNamespace(annotations=[SimpleNamespace(title="NASA", url="https://nasa.gov")])])],
         )
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
             response = self.client.post("/api/verify-hallucination", json={"prompt": "Question", "response": "Answer"})
 
         self.assertEqual(response.status_code, 500)
-        self.assertEqual(response.get_json(), {"error": "OpenAI did not return a valid verification result."})
+        self.assertEqual(response.get_json(), {"error": "OpenAI did not return a verification message."})
 
     @patch("app.OpenAI")
-    def test_verification_is_inconclusive_without_web_evidence(self, openai):
-        result = {
-            "status": "no_hallucination_found",
-            "reason": "The claim is correct.",
-            "problematic_claims": [],
-        }
+    def test_verification_keeps_a_message_without_web_evidence(self, openai):
+        message = "I could not find sufficient web evidence to assess this claim."
         openai.return_value.responses.create.return_value = SimpleNamespace(
-            output_text=__import__("json").dumps(result), output=[]
+            output_text=message, output=[]
         )
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
             response = self.client.post(
@@ -202,9 +194,7 @@ class GenerateRouteTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {
-            "status": "inconclusive",
-            "reason": "No sufficient web evidence was recovered to verify the response.",
-            "problematic_claims": [],
+            "message": message,
             "sources": [],
         })
 

@@ -55,9 +55,8 @@ RUNTIME_ERROR_CODES = {
     "OpenAI did not return a valid text response.": "generated_text_invalid",
     "OpenAI did not return plain text.": "plain_text_invalid",
     "OpenAI did not return a valid path continuation.": "generated_path_invalid",
-    "OpenAI did not return a valid verification result.": "verification_result_invalid",
+    "OpenAI did not return a verification message.": "verification_message_missing",
 }
-VERIFICATION_STATUSES = {"hallucination_found", "no_hallucination_found", "inconclusive"}
 
 
 def get_model_response(
@@ -236,34 +235,9 @@ def get_verification_result(prompt: str, response: str, locale: str) -> Dict:
     )
     sources = normalize_web_sources(provider_response)
     content = _response_value(provider_response, "output_text")
-    try:
-        result = json.loads(content) if isinstance(content, str) else None
-    except json.JSONDecodeError:
-        result = None
-
-    if (
-        not isinstance(result, dict)
-        or set(result) != {"status", "reason", "problematic_claims"}
-        or result.get("status") not in VERIFICATION_STATUSES
-        or not isinstance(result.get("reason"), str)
-        or not result["reason"].strip()
-        or not isinstance(result.get("problematic_claims"), list)
-        or not all(isinstance(claim, str) and claim.strip() for claim in result["problematic_claims"])
-        or (result["status"] != "hallucination_found" and result["problematic_claims"])
-    ):
-        raise RuntimeError("OpenAI did not return a valid verification result.")
-    if not sources:
-        return {
-            "status": "inconclusive",
-            "reason": "No sufficient web evidence was recovered to verify the response.",
-            "problematic_claims": [],
-            "sources": [],
-        }
-    relation = "contradicts" if result["status"] == "hallucination_found" else (
-        "supports" if result["status"] == "no_hallucination_found" else "evidence"
-    )
-    result["sources"] = [{**source, "relation": relation} for source in sources]
-    return result
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("OpenAI did not return a verification message.")
+    return {"message": content, "sources": sources}
 
 
 def get_generation_settings(data: Dict) -> Tuple[int, float]:

@@ -7,7 +7,7 @@ O Hallucination Path mistura hoje o encerramento da exploração com a verifica�
 - Separar a finalização da exploração da solicitação de verificação: finalizar congela o caminho e nunca chama a API de verificação.
 - Adicionar uma seção de verificação de alucinação abaixo da árvore de caminhos, com ação explicitamente acionada pela pessoa e indisponível até a finalização.
 - Avaliar a premissa e a resposta final com um modelo diferente do gerador, usando reasoning e pesquisa web obrigatória em fontes externas.
-- Devolver e exibir um veredito estruturado, alegações problemáticas e fontes consultadas, preservando o caminho finalizado em todos os resultados e falhas.
+- Devolver e exibir a mensagem textual livre do agente avaliador e as fontes consultadas, preservando o caminho finalizado em todos os resultados e falhas.
 
 ## Capabilities
 
