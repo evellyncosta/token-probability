@@ -3,8 +3,8 @@
     const SUPPORTED_LOCALES = new Set(['pt-BR', 'en']);
     const STORAGE_KEY = 'token-probability-locale';
     const fallbackTranslations = {
-        'pt-BR': { pathComplete: 'Esta continuação foi completamente revelada.', pathPremise: 'Premissa', assistantResponse: 'Resposta do assistant', pathResponseEmpty: 'Escolha um token para revelar a resposta.', verificationLoading: 'Verificando possível alucinação...', verificationFound: 'Possível alucinação encontrada', verificationClear: 'Nenhuma possível alucinação encontrada', verificationInconclusive: 'Verificação inconclusiva', verificationFailed: 'Não foi possível verificar esta resposta. Tente novamente.', verificationLimit: 'Esta é uma avaliação por LLM, sem confirmação por fontes externas.' },
-        en: { pathComplete: 'This continuation has been fully revealed.', pathPremise: 'Premise', assistantResponse: 'Assistant response', pathResponseEmpty: 'Choose a token to reveal the response.', verificationLoading: 'Checking for a possible hallucination...', verificationFound: 'Possible hallucination found', verificationClear: 'No possible hallucination found', verificationInconclusive: 'Verification is inconclusive', verificationFailed: 'This response could not be verified. Try again.', verificationLimit: 'This is an LLM assessment, without confirmation from external sources.' },
+        'pt-BR': { pathComplete: 'Esta continuação foi completamente revelada.', pathPremise: 'Premissa', assistantResponse: 'Resposta do assistant', pathResponseEmpty: 'Escolha um token para revelar a resposta.', verificationLoading: 'Verificando possível alucinação...', verificationFound: 'Possível alucinação encontrada', verificationClear: 'Nenhuma possível alucinação encontrada', verificationInconclusive: 'Verificação inconclusiva', verificationFailed: 'Não foi possível verificar esta resposta. Tente novamente.', verificationLimit: 'Esta é uma avaliação por LLM baseada em fontes externas.', verificationSectionTitle: 'Verificação de alucinação', verificationSectionDescription: 'Finalize a exploração para habilitar a verificação com fontes externas.', verifyHallucination: 'Verificar alucinação' },
+        en: { pathComplete: 'This continuation has been fully revealed.', pathPremise: 'Premise', assistantResponse: 'Assistant response', pathResponseEmpty: 'Choose a token to reveal the response.', verificationLoading: 'Checking for a possible hallucination...', verificationFound: 'Possible hallucination found', verificationClear: 'No possible hallucination found', verificationInconclusive: 'Verification is inconclusive', verificationFailed: 'This response could not be verified. Try again.', verificationLimit: 'This is an LLM assessment based on external sources.', verificationSectionTitle: 'Hallucination verification', verificationSectionDescription: 'Finish the exploration to enable verification with external sources.', verifyHallucination: 'Verify hallucination' },
     };
     const translations = {
         'pt-BR': {
@@ -19,12 +19,13 @@
     function t(key) { return translations[getLocale()][key] || fallbackTranslations[getLocale()][key] || key; }
     function applyLocale(locale) {
         const activeLocale = normalizeLocale(locale);
+        const translate = (key) => translations[activeLocale][key] || fallbackTranslations[activeLocale][key] || key;
         localStorage.setItem(STORAGE_KEY, activeLocale);
         document.documentElement.lang = activeLocale;
-        document.title = translations[activeLocale][document.body.dataset.titleKey || 'appTitle'] || document.title;
-        document.querySelectorAll('[data-i18n]').forEach((element) => { element.textContent = translations[activeLocale][element.dataset.i18n] || element.dataset.i18n; });
-        document.querySelectorAll('[data-i18n-placeholder]').forEach((element) => { element.placeholder = translations[activeLocale][element.dataset.i18nPlaceholder] || ''; });
-        document.querySelectorAll('[data-i18n-aria-label]').forEach((element) => { element.setAttribute('aria-label', translations[activeLocale][element.dataset.i18nAriaLabel] || element.dataset.i18nAriaLabel); });
+        document.title = translate(document.body.dataset.titleKey || 'appTitle');
+        document.querySelectorAll('[data-i18n]').forEach((element) => { element.textContent = translate(element.dataset.i18n); });
+        document.querySelectorAll('[data-i18n-placeholder]').forEach((element) => { element.placeholder = translate(element.dataset.i18nPlaceholder); });
+        document.querySelectorAll('[data-i18n-aria-label]').forEach((element) => { element.setAttribute('aria-label', translate(element.dataset.i18nAriaLabel)); });
         document.querySelectorAll('[data-locale]').forEach((button) => { button.setAttribute('aria-pressed', String(button.dataset.locale === activeLocale)); });
         document.dispatchEvent(new CustomEvent('localechange', { detail: { locale: activeLocale } }));
     }

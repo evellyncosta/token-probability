@@ -28,6 +28,7 @@ const elements = new Map([
     ['path-prompt-input', new Element()],
     ['path-start-btn', new Element()],
     ['finish-path-btn', new Element()],
+    ['verify-hallucination-btn', new Element()],
     ['path-candidates', new Element()],
     ['path-tree', new Element()],
     ['active-premise-label', new Element()],
@@ -92,21 +93,17 @@ async function clickCandidate(index) {
     assert.equal(calls.length, 1, 'revealing the final selected token must not fetch');
     assert.equal(elements.get('path-candidates').textContent, 'pathComplete');
     await elements.get('finish-path-btn').events.click();
-    assert.equal(calls.at(-1).prompt, 'False premise');
-    assert.equal(calls.at(-1).response, ' A B');
-    assert.equal(elements.get('verification-title').textContent, 'verificationFound');
+    assert.equal(calls.length, 1, 'finishing must not verify the path');
+    assert.equal(elements.get('verify-hallucination-btn').disabled, false);
+    const frozenResponse = elements.get('active-response-text').textContent;
     const rootTreeItem = elements.get('path-tree').children[0].children[0];
     const firstTokenTreeItem = rootTreeItem.children[1].children[0];
     await firstTokenTreeItem.children[0].events.click();
-    assert.equal(elements.get('verification-result').hidden, true, 'a different response must not reuse the child verification');
-    await firstTokenTreeItem.children[1].children[0].children[0].events.click();
-    assert.equal(elements.get('verification-title').textContent, 'verificationFound', 'returning to the finalized response must restore its own verification');
-
-    await elements.get('path-start-btn').events.click();
-    await clickCandidate(1);
-    assert.equal(calls.length, 4, 'an alternative must fetch one branch segment');
-    assert.equal(calls[3].response_prefix, ' alt');
-    assert.equal(elements.get('path-candidates').children[0].children[0].textContent, '␠branch');
+    assert.equal(elements.get('active-response-text').textContent, frozenResponse, 'finalizing must prevent changing the active branch');
+    await elements.get('verify-hallucination-btn').events.click();
+    assert.equal(calls.at(-1).prompt, 'False premise');
+    assert.equal(calls.at(-1).response, ' A B');
+    assert.equal(elements.get('verification-title').textContent, 'verificationFound');
 })().catch((error) => {
     console.error(error);
     process.exitCode = 1;

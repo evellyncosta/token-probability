@@ -1,9 +1,14 @@
 (() => {
-    const state = { nodes: new Map(), activeNodeId: null, nextId: 0, loading: false };
+    const state = {
+        nodes: new Map(), activeNodeId: null, nextId: 0, loading: false,
+        finalized: false, finalSnapshot: null,
+        verification: null, verificationLoading: false, verificationFailed: false,
+    };
     const isStaticDemo = document.body.dataset.staticDemo === 'true';
     const input = document.getElementById('path-prompt-input');
     const startButton = document.getElementById('path-start-btn');
     const finishButton = document.getElementById('finish-path-btn');
+    const verifyButton = document.getElementById('verify-hallucination-btn');
     const candidatesElement = document.getElementById('path-candidates');
     const treeElement = document.getElementById('path-tree');
     const activePremiseLabelElement = document.getElementById('active-premise-label');
@@ -33,7 +38,7 @@
 
     function createNode({ parentId = null, token = '', probability = null, context, responsePrefix = '', segment = [], nextIndex = 0 }) {
         const id = `path-node-${state.nextId++}`;
-        const node = { id, parentId, token, probability, context, responsePrefix, segment, nextIndex, children: [], verification: null, verificationLoading: false, verificationFailed: false };
+        const node = { id, parentId, token, probability, context, responsePrefix, segment, nextIndex, children: [] };
         state.nodes.set(id, node);
         if (parentId) state.nodes.get(parentId).children.push(id);
         return node;
@@ -58,30 +63,26 @@
         activeResponseLabelElement.textContent = t('assistantResponse');
         activePremiseElement.textContent = root ? root.context : t('pathEmpty');
         activeResponseElement.textContent = node?.responsePrefix || t('pathResponseEmpty');
-        finishButton.disabled = !node?.responsePrefix || node.verificationLoading;
+        finishButton.disabled = !node?.responsePrefix || state.loading || state.finalized;
     }
 
     function renderVerification() {
-        const node = activeNode();
         verificationClaimsElement.innerHTML = '';
         verificationSourcesElement.innerHTML = '';
-        if (!node?.responsePrefix) {
-            verificationElement.hidden = true;
-            return;
-        }
-        if (node.verificationLoading) {
+        verifyButton.disabled = !state.finalSnapshot || state.verificationLoading;
+        if (state.verificationLoading) {
             verificationElement.hidden = false;
             verificationTitleElement.textContent = t('verificationLoading');
             verificationReasonElement.textContent = '';
             return;
         }
-        if (node.verificationFailed) {
+        if (state.verificationFailed) {
             verificationElement.hidden = false;
             verificationTitleElement.textContent = t('verificationFailed');
             verificationReasonElement.textContent = '';
             return;
         }
-        if (!node.verification) {
+        if (!state.verification) {
             verificationElement.hidden = true;
             return;
         }
@@ -91,14 +92,14 @@
             inconclusive: 'verificationInconclusive',
         };
         verificationElement.hidden = false;
-        verificationTitleElement.textContent = t(titles[node.verification.status]);
-        verificationReasonElement.textContent = node.verification.reason;
-        node.verification.problematic_claims.forEach((claim) => {
+        verificationTitleElement.textContent = t(titles[state.verification.status]);
+        verificationReasonElement.textContent = state.verification.reason;
+        state.verification.problematic_claims.forEach((claim) => {
             const item = document.createElement('li');
             item.textContent = claim;
             verificationClaimsElement.appendChild(item);
         });
-        (node.verification.sources || []).forEach((source) => {
+        (state.verification.sources || []).forEach((source) => {
             const item = document.createElement('li');
             const link = document.createElement('a');
             link.href = source.url;
@@ -112,6 +113,10 @@
 
     function renderCandidates() {
         candidatesElement.innerHTML = '';
+        if (state.finalized) {
+            candidatesElement.textContent = t('pathFinished');
+            return;
+        }
         const tokenData = currentTokenData(activeNode());
         if (!tokenData) {
             if (activeNode() && !state.loading) candidatesElement.textContent = t('pathComplete');
@@ -150,6 +155,7 @@
             probability.textContent = ` ${(node.probability * 100).toFixed(1)}%`;
             button.appendChild(probability);
         }
+        button.disabled = state.finalized;
         button.addEventListener('click', () => selectNode(node.id));
         item.appendChild(button);
         if (node.children.length) {
@@ -227,6 +233,11 @@
         }
         state.nodes.clear();
         state.nextId = 0;
+        state.finalized = false;
+        state.finalSnapshot = null;
+        state.verification = null;
+        state.verificationLoading = false;
+        state.verificationFailed = false;
         const root = createNode({ context: premise });
         state.activeNodeId = root.id;
         input.disabled = true;
@@ -237,7 +248,7 @@
     async function chooseCandidate(candidate) {
         const parent = activeNode();
         const tokenData = currentTokenData(parent);
-        if (!parent || !tokenData || state.loading) return;
+        if (!parent || !tokenData || state.loading || state.finalized) return;
         const isOriginalChoice = candidate.token === tokenData.selected_token;
         const child = createNode({
             parentId: parent.id,
@@ -254,21 +265,30 @@
     }
 
     function selectNode(nodeId) {
+        if (state.finalized) return;
         state.activeNodeId = nodeId;
         statusElement.textContent = '';
         render();
     }
 
-    async function verifyPath() {
+    function finishPath() {
         const node = activeNode();
         const root = rootNode();
-        if (!node?.responsePrefix || node.verificationLoading) return;
-        node.verificationLoading = true;
-        node.verificationFailed = false;
+        if (state.finalized || !node?.responsePrefix || !root) return;
+        state.finalized = true;
+        state.finalSnapshot = Object.freeze({ prompt: root.context, response: node.responsePrefix });
+        statusElement.textContent = t('pathFinished');
+        render();
+    }
+
+    async function verifyPath() {
+        if (!state.finalSnapshot || state.verificationLoading) return;
+        state.verificationLoading = true;
+        state.verificationFailed = false;
         render();
         try {
             if (isStaticDemo) {
-                node.verification = {
+                state.verification = {
                     status: 'hallucination_found',
                     reason: 'A continuação apresenta uma explicação factual que precisa de verificação.',
                     problematic_claims: ['A explicação apresentada não foi confirmada por fontes externas.'],
@@ -278,18 +298,18 @@
                 const response = await fetch('/api/verify-hallucination', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt: root.context, response: node.responsePrefix, locale: window.i18n.getLocale() }),
+                    body: JSON.stringify({ ...state.finalSnapshot, locale: window.i18n.getLocale() }),
                 });
                 if (!response.ok) throw new Error('Could not verify the path response.');
-                node.verification = await response.json();
+                state.verification = await response.json();
             }
         } catch (error) {
-            node.verification = null;
-            node.verificationFailed = true;
+            state.verification = null;
+            state.verificationFailed = true;
             console.error(error);
         } finally {
-            node.verificationLoading = false;
-            if (state.activeNodeId === node.id) render();
+            state.verificationLoading = false;
+            render();
         }
     }
 
@@ -300,6 +320,7 @@
             startPath();
         }
     });
-    finishButton.addEventListener('click', verifyPath);
+    finishButton.addEventListener('click', finishPath);
+    verifyButton.addEventListener('click', verifyPath);
     document.addEventListener('localechange', render);
 })();

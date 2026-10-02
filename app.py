@@ -25,6 +25,7 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 MODEL_NAME = "gpt-5.4-nano"
+VERIFICATION_MODEL_NAME = "gpt-5.5"
 WORD_PATTERN = re.compile(r"[^\W\d_]+(?:[-'][^\W\d_]+)*$", re.UNICODE)
 MARKDOWN_PATTERNS = (
     re.compile(r"```"),
@@ -190,15 +191,30 @@ def validate_response(response_text: str, token_probs: List[Dict], mode: str) ->
     raise ValueError("Generation mode must be 'word', 'text', or 'path'.")
 
 
+def _response_value(value, name):
+    return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+
+
 def normalize_web_sources(provider_response) -> List[Dict]:
     sources = []
-    for output in getattr(provider_response, "output", []) or []:
-        for content in getattr(output, "content", []) or []:
-            for annotation in getattr(content, "annotations", []) or []:
-                url = getattr(annotation, "url", None)
-                title = getattr(annotation, "title", None)
-                if url and title and not any(source["url"] == url for source in sources):
-                    sources.append({"title": title, "url": url, "relation": "evidence", "retrieved_at": time.strftime("%Y-%m-%d", time.gmtime())})
+    def add_source(source):
+        url = _response_value(source, "url")
+        title = _response_value(source, "title") or url
+        if url and not any(item["url"] == url for item in sources):
+            sources.append({
+                "title": title,
+                "url": url,
+                "relation": "evidence",
+                "retrieved_at": time.strftime("%Y-%m-%d", time.gmtime()),
+            })
+
+    for output in _response_value(provider_response, "output") or []:
+        action = _response_value(output, "action")
+        for source in (_response_value(action, "sources") if action else []) or []:
+            add_source(source)
+        for content in _response_value(output, "content") or []:
+            for annotation in _response_value(content, "annotations") or []:
+                add_source(annotation)
     return sources
 
 
@@ -208,24 +224,18 @@ def get_verification_result(prompt: str, response: str, locale: str) -> Dict:
         raise RuntimeError("OpenAI API key is not configured on the server.")
 
     system_prompt, max_tokens = get_verification_profile(locale)
-    web_response = OpenAI(api_key=api_key).responses.create(
-        model=MODEL_NAME,
+    provider_response = OpenAI(api_key=api_key).responses.create(
+        model=VERIFICATION_MODEL_NAME,
         tools=[{"type": "web_search"}],
-        instructions=("Find authoritative web evidence needed to fact-check the supplied response. "
-                      "Return no answer beyond the evidence search."),
+        tool_choice="required",
+        reasoning={"effort": "medium"},
+        instructions=system_prompt,
         input=json.dumps({"prompt": prompt, "response": response}),
-        max_output_tokens=300,
+        max_output_tokens=max_tokens,
         store=False,
     )
-    sources = normalize_web_sources(web_response)
-    if not sources:
-        return {"status": "inconclusive", "reason": "No sufficient web evidence was recovered to verify the response.", "problematic_claims": [], "sources": []}
-    model = ChatOpenAI(model=MODEL_NAME, temperature=0.0, max_tokens=max_tokens)
-    provider_response = model.invoke([
-        {"role": "developer", "content": system_prompt},
-        {"role": "user", "content": json.dumps({"prompt": prompt, "response": response, "sources": sources})},
-    ])
-    content = provider_response.content
+    sources = normalize_web_sources(provider_response)
+    content = _response_value(provider_response, "output_text")
     try:
         result = json.loads(content) if isinstance(content, str) else None
     except json.JSONDecodeError:
@@ -242,9 +252,16 @@ def get_verification_result(prompt: str, response: str, locale: str) -> Dict:
         or (result["status"] != "hallucination_found" and result["problematic_claims"])
     ):
         raise RuntimeError("OpenAI did not return a valid verification result.")
-    if result["status"] != "inconclusive" and not sources:
-        raise RuntimeError("OpenAI did not return a valid verification result.")
-    relation = "contradicts" if result["status"] == "hallucination_found" else "supports"
+    if not sources:
+        return {
+            "status": "inconclusive",
+            "reason": "No sufficient web evidence was recovered to verify the response.",
+            "problematic_claims": [],
+            "sources": [],
+        }
+    relation = "contradicts" if result["status"] == "hallucination_found" else (
+        "supports" if result["status"] == "no_hallucination_found" else "evidence"
+    )
     result["sources"] = [{**source, "relation": relation} for source in sources]
     return result
 
