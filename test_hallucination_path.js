@@ -35,6 +35,11 @@ const elements = new Map([
     ['active-response-label', new Element()],
     ['active-response-text', new Element()],
     ['path-status', new Element()],
+    ['verification-result', new Element()],
+    ['verification-title', new Element()],
+    ['verification-reason', new Element()],
+    ['verification-claims', new Element()],
+    ['verification-sources', new Element()],
 ]);
 global.document = {
     body: { dataset: { staticDemo: 'false' } },
@@ -55,6 +60,9 @@ const calls = [];
 global.fetch = async (_url, options) => {
     const payload = JSON.parse(options.body);
     calls.push(payload);
+    if (_url === '/api/verify-hallucination') {
+        return { ok: true, json: async () => ({ status: 'hallucination_found', reason: 'Incorrect factual claim.', problematic_claims: ['Incorrect claim'] }) };
+    }
     return {
         ok: true,
         json: async () => ({ tokenProbs: payload.response_prefix ? branchSegment : initialSegment }),
@@ -83,11 +91,21 @@ async function clickCandidate(index) {
     await clickCandidate(0);
     assert.equal(calls.length, 1, 'revealing the final selected token must not fetch');
     assert.equal(elements.get('path-candidates').textContent, 'pathComplete');
+    await elements.get('finish-path-btn').events.click();
+    assert.equal(calls.at(-1).prompt, 'False premise');
+    assert.equal(calls.at(-1).response, ' A B');
+    assert.equal(elements.get('verification-title').textContent, 'verificationFound');
+    const rootTreeItem = elements.get('path-tree').children[0].children[0];
+    const firstTokenTreeItem = rootTreeItem.children[1].children[0];
+    await firstTokenTreeItem.children[0].events.click();
+    assert.equal(elements.get('verification-result').hidden, true, 'a different response must not reuse the child verification');
+    await firstTokenTreeItem.children[1].children[0].children[0].events.click();
+    assert.equal(elements.get('verification-title').textContent, 'verificationFound', 'returning to the finalized response must restore its own verification');
 
     await elements.get('path-start-btn').events.click();
     await clickCandidate(1);
-    assert.equal(calls.length, 3, 'an alternative must fetch one branch segment');
-    assert.equal(calls[2].response_prefix, ' alt');
+    assert.equal(calls.length, 4, 'an alternative must fetch one branch segment');
+    assert.equal(calls[3].response_prefix, ' alt');
     assert.equal(elements.get('path-candidates').children[0].children[0].textContent, '␠branch');
 })().catch((error) => {
     console.error(error);

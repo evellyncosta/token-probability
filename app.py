@@ -5,12 +5,19 @@ import math
 import re
 import time
 import uuid
+import json
 from typing import Dict, List, Tuple
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
+from openai import OpenAI
 import tiktoken
 
-from prompts import DEFAULT_LOCALE, get_generation_profile, normalize_locale
+from prompts import (
+    DEFAULT_LOCALE,
+    get_generation_profile,
+    get_verification_profile,
+    normalize_locale,
+)
 
 load_dotenv()
 
@@ -47,7 +54,9 @@ RUNTIME_ERROR_CODES = {
     "OpenAI did not return a valid text response.": "generated_text_invalid",
     "OpenAI did not return plain text.": "plain_text_invalid",
     "OpenAI did not return a valid path continuation.": "generated_path_invalid",
+    "OpenAI did not return a valid verification result.": "verification_result_invalid",
 }
+VERIFICATION_STATUSES = {"hallucination_found", "no_hallucination_found", "inconclusive"}
 
 
 def get_model_response(
@@ -179,6 +188,65 @@ def validate_response(response_text: str, token_probs: List[Dict], mode: str) ->
         validate_path_continuation(response_text, token_probs)
         return
     raise ValueError("Generation mode must be 'word', 'text', or 'path'.")
+
+
+def normalize_web_sources(provider_response) -> List[Dict]:
+    sources = []
+    for output in getattr(provider_response, "output", []) or []:
+        for content in getattr(output, "content", []) or []:
+            for annotation in getattr(content, "annotations", []) or []:
+                url = getattr(annotation, "url", None)
+                title = getattr(annotation, "title", None)
+                if url and title and not any(source["url"] == url for source in sources):
+                    sources.append({"title": title, "url": url, "relation": "evidence", "retrieved_at": time.strftime("%Y-%m-%d", time.gmtime())})
+    return sources
+
+
+def get_verification_result(prompt: str, response: str, locale: str) -> Dict:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OpenAI API key is not configured on the server.")
+
+    system_prompt, max_tokens = get_verification_profile(locale)
+    web_response = OpenAI(api_key=api_key).responses.create(
+        model=MODEL_NAME,
+        tools=[{"type": "web_search"}],
+        instructions=("Find authoritative web evidence needed to fact-check the supplied response. "
+                      "Return no answer beyond the evidence search."),
+        input=json.dumps({"prompt": prompt, "response": response}),
+        max_output_tokens=300,
+        store=False,
+    )
+    sources = normalize_web_sources(web_response)
+    if not sources:
+        return {"status": "inconclusive", "reason": "No sufficient web evidence was recovered to verify the response.", "problematic_claims": [], "sources": []}
+    model = ChatOpenAI(model=MODEL_NAME, temperature=0.0, max_tokens=max_tokens)
+    provider_response = model.invoke([
+        {"role": "developer", "content": system_prompt},
+        {"role": "user", "content": json.dumps({"prompt": prompt, "response": response, "sources": sources})},
+    ])
+    content = provider_response.content
+    try:
+        result = json.loads(content) if isinstance(content, str) else None
+    except json.JSONDecodeError:
+        result = None
+
+    if (
+        not isinstance(result, dict)
+        or set(result) != {"status", "reason", "problematic_claims"}
+        or result.get("status") not in VERIFICATION_STATUSES
+        or not isinstance(result.get("reason"), str)
+        or not result["reason"].strip()
+        or not isinstance(result.get("problematic_claims"), list)
+        or not all(isinstance(claim, str) and claim.strip() for claim in result["problematic_claims"])
+        or (result["status"] != "hallucination_found" and result["problematic_claims"])
+    ):
+        raise RuntimeError("OpenAI did not return a valid verification result.")
+    if result["status"] != "inconclusive" and not sources:
+        raise RuntimeError("OpenAI did not return a valid verification result.")
+    relation = "contradicts" if result["status"] == "hallucination_found" else "supports"
+    result["sources"] = [{**source, "relation": relation} for source in sources]
+    return result
 
 
 def get_generation_settings(data: Dict) -> Tuple[int, float]:
@@ -379,6 +447,50 @@ def generate():
             include_traceback=True,
         )
         return generation_error_response('OpenAI generation request failed.', 502, request_id)
+
+
+@app.route('/api/verify-hallucination', methods=['POST'])
+def verify_hallucination():
+    request_id = str(uuid.uuid4())
+    started_at = time.perf_counter()
+    locale = DEFAULT_LOCALE
+    try:
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            raise ValueError("Request body must be a JSON object")
+        prompt = data.get("prompt")
+        response = data.get("response")
+        locale = get_generation_locale(data)
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError("Prompt is required")
+        if not isinstance(response, str) or not response.strip():
+            raise ValueError("Response is required")
+        result = get_verification_result(prompt, response, locale)
+        http_response = jsonify(result)
+        log_generation_outcome(
+            request_id=request_id, status=200, outcome="success", mode="verification",
+            locale=locale, top_k="none", temperature=0.0, started_at=started_at,
+        )
+        return http_response
+    except ValueError as error:
+        log_generation_outcome(
+            request_id=request_id, status=400, outcome="handled_error", mode="verification",
+            locale=locale, top_k="none", temperature=0.0, started_at=started_at, error=error,
+        )
+        return generation_error_response(str(error), 400, request_id)
+    except RuntimeError as error:
+        log_generation_outcome(
+            request_id=request_id, status=500, outcome="handled_error", mode="verification",
+            locale=locale, top_k="none", temperature=0.0, started_at=started_at, error=error,
+        )
+        return generation_error_response(str(error), 500, request_id)
+    except Exception as error:
+        log_generation_outcome(
+            request_id=request_id, status=502, outcome="unexpected_error", mode="verification",
+            locale=locale, top_k="none", temperature=0.0, started_at=started_at,
+            error=error, include_traceback=True,
+        )
+        return generation_error_response("OpenAI verification request failed.", 502, request_id)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

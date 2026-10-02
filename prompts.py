@@ -16,6 +16,7 @@ PROMPT_FILES = {
     "word": "word.yaml",
     "text": "text.yaml",
     "path": "path.yaml",
+    "verification": "verification.yaml",
 }
 REQUIRED_PROMPT_FIELDS = {"template", "max_tokens"}
 REQUIRED_TEMPLATE_VARIABLES = {"locale_instruction"}
@@ -73,6 +74,7 @@ GENERATION_PROFILES = load_generation_profiles()
 WORD_PROMPT_TEMPLATE, MAX_WORD_TOKENS = GENERATION_PROFILES["word"]
 TEXT_PROMPT_TEMPLATE, MAX_TEXT_TOKENS = GENERATION_PROFILES["text"]
 PATH_PROMPT_TEMPLATE, MAX_PATH_TOKENS = GENERATION_PROFILES["path"]
+VERIFICATION_PROMPT_TEMPLATE, MAX_VERIFICATION_TOKENS = GENERATION_PROFILES["verification"]
 
 
 def normalize_locale(locale: object) -> str:
@@ -87,3 +89,11 @@ def get_generation_profile(mode: str, locale: str = DEFAULT_LOCALE) -> Tuple[str
 
     locale_instruction = LOCALE_INSTRUCTIONS[normalize_locale(locale)]
     return prompt_template.format(locale_instruction=locale_instruction), max_tokens
+
+
+def get_verification_profile(locale: str = DEFAULT_LOCALE) -> Tuple[str, int]:
+    locale_instruction = LOCALE_INSTRUCTIONS[normalize_locale(locale)]
+    return (
+        VERIFICATION_PROMPT_TEMPLATE.format(locale_instruction=locale_instruction),
+        MAX_VERIFICATION_TOKENS,
+    )

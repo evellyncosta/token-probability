@@ -22,6 +22,8 @@ from prompts import (
     PATH_PROMPT_TEMPLATE,
     PROMPT_TEMPLATE_DIRECTORY,
     TEXT_PROMPT_TEMPLATE,
+    VERIFICATION_PROMPT_TEMPLATE,
+    MAX_VERIFICATION_TOKENS,
     get_generation_profile,
     load_generation_profiles,
     normalize_locale,
@@ -139,6 +141,65 @@ class GenerateRouteTests(TestCase):
         self.assertIn("top_k=5", record)
         self.assertIn("temperature=0.0", record)
 
+    @patch("app.OpenAI")
+    @patch("app.ChatOpenAI")
+    def test_verification_uses_a_separate_json_contract(self, chat_openai, openai):
+        result = {
+            "status": "hallucination_found",
+            "reason": "Atmospheric refraction does not explain the moon illusion.",
+            "problematic_claims": ["Atmospheric refraction causes the apparent enlargement."],
+        }
+        openai.return_value.responses.create.return_value = SimpleNamespace(output=[SimpleNamespace(content=[SimpleNamespace(annotations=[SimpleNamespace(title="NASA", url="https://nasa.gov")])])])
+        chat_openai.return_value.invoke.return_value = SimpleNamespace(content=__import__("json").dumps(result))
+        prompt = "Why does the moon look larger on the horizon?"
+        answer = "It is caused by atmospheric refraction."
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
+            response = self.client.post("/api/verify-hallucination", json={"prompt": prompt, "response": answer})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {**result, "sources": [{"title": "NASA", "url": "https://nasa.gov", "relation": "contradicts", "retrieved_at": "2026-10-02"}]})
+        chat_openai.assert_called_once_with(model=MODEL_NAME, temperature=0.0, max_tokens=MAX_VERIFICATION_TOKENS)
+        messages = chat_openai.return_value.invoke.call_args.args[0]
+        self.assertEqual(messages[0]["content"], VERIFICATION_PROMPT_TEMPLATE.format(locale_instruction="Respond in Brazilian Portuguese."))
+        self.assertEqual(__import__("json").loads(messages[1]["content"]), {"prompt": prompt, "response": answer, "sources": [{"title": "NASA", "url": "https://nasa.gov", "relation": "evidence", "retrieved_at": "2026-10-02"}]})
+
+    @patch("app.OpenAI")
+    @patch("app.ChatOpenAI")
+    def test_verification_rejects_invalid_provider_json_without_a_verdict(self, chat_openai, openai):
+        openai.return_value.responses.create.return_value = SimpleNamespace(output=[SimpleNamespace(content=[SimpleNamespace(annotations=[SimpleNamespace(title="NASA", url="https://nasa.gov")])])])
+        chat_openai.return_value.invoke.return_value = SimpleNamespace(content='{"status":"no_hallucination_found"}')
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
+            response = self.client.post("/api/verify-hallucination", json={"prompt": "Question", "response": "Answer"})
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.get_json(), {"error": "OpenAI did not return a valid verification result."})
+
+    def test_verification_requires_a_non_empty_response(self):
+        response = self.client.post("/api/verify-hallucination", json={"prompt": "Question", "response": ""})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json(), {"error": "Response is required"})
+
+    @patch("app.OpenAI")
+    @patch("app.ChatOpenAI")
+    def test_verification_provider_failure_does_not_log_prompt_or_response(self, chat_openai, openai):
+        openai.return_value.responses.create.return_value = SimpleNamespace(output=[SimpleNamespace(content=[SimpleNamespace(annotations=[SimpleNamespace(title="NASA", url="https://nasa.gov")])])])
+        secret = "OPENAI_API_KEY=secret-key"
+        prompt = "PROMPT_MUST_NOT_APPEAR"
+        answer = "RESPONSE_MUST_NOT_APPEAR"
+        chat_openai.return_value.invoke.side_effect = Exception(secret)
+        with self.assertLogs(app.logger, level="ERROR") as logs, patch.dict(
+            os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True
+        ):
+            response = self.client.post("/api/verify-hallucination", json={"prompt": prompt, "response": answer})
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.get_json(), {"error": "OpenAI verification request failed."})
+        record = "\n".join(logs.output)
+        self.assertIn("mode=verification", record)
+        self.assertNotIn(secret, record)
+        self.assertNotIn(prompt, record)
+        self.assertNotIn(answer, record)
+
     def test_validation_failure_is_logged_with_a_correlation_id(self):
         with self.assertLogs(app.logger, level="WARNING") as logs:
             response = self.client.post(
@@ -202,6 +263,7 @@ class GenerateRouteTests(TestCase):
             max_tokens=16,
             logprobs=True,
             top_logprobs=5,
+            reasoning_effort="none",
         )
 
     @patch("app.ChatOpenAI")
@@ -228,6 +290,7 @@ class GenerateRouteTests(TestCase):
             max_tokens=MAX_TEXT_TOKENS,
             logprobs=True,
             top_logprobs=5,
+            reasoning_effort="none",
         )
         self.assertEqual(
             chat_openai.return_value.invoke.call_args.args[0][0]["content"],
@@ -307,6 +370,7 @@ class GenerateRouteTests(TestCase):
             max_tokens=MAX_PATH_TOKENS,
             logprobs=True,
             top_logprobs=5,
+            reasoning_effort="none",
         )
         self.assertEqual(
             chat_openai.return_value.invoke.call_args.args[0][0]["content"],

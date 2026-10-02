@@ -11,6 +11,11 @@
     const activeResponseLabelElement = document.getElementById('active-response-label');
     const activeResponseElement = document.getElementById('active-response-text');
     const statusElement = document.getElementById('path-status');
+    const verificationElement = document.getElementById('verification-result');
+    const verificationTitleElement = document.getElementById('verification-title');
+    const verificationReasonElement = document.getElementById('verification-reason');
+    const verificationClaimsElement = document.getElementById('verification-claims');
+    const verificationSourcesElement = document.getElementById('verification-sources');
 
     const staticInitialSegment = [
         { selected_token: ' it', selected_prob: 0.72, top_logprobs: [{ token: ' it', probability: 0.72 }, { token: ' Sydney', probability: 0.15 }, { token: ' the', probability: 0.08 }] },
@@ -28,7 +33,7 @@
 
     function createNode({ parentId = null, token = '', probability = null, context, responsePrefix = '', segment = [], nextIndex = 0 }) {
         const id = `path-node-${state.nextId++}`;
-        const node = { id, parentId, token, probability, context, responsePrefix, segment, nextIndex, children: [] };
+        const node = { id, parentId, token, probability, context, responsePrefix, segment, nextIndex, children: [], verification: null, verificationLoading: false, verificationFailed: false };
         state.nodes.set(id, node);
         if (parentId) state.nodes.get(parentId).children.push(id);
         return node;
@@ -53,7 +58,56 @@
         activeResponseLabelElement.textContent = t('assistantResponse');
         activePremiseElement.textContent = root ? root.context : t('pathEmpty');
         activeResponseElement.textContent = node?.responsePrefix || t('pathResponseEmpty');
-        finishButton.disabled = !node;
+        finishButton.disabled = !node?.responsePrefix || node.verificationLoading;
+    }
+
+    function renderVerification() {
+        const node = activeNode();
+        verificationClaimsElement.innerHTML = '';
+        verificationSourcesElement.innerHTML = '';
+        if (!node?.responsePrefix) {
+            verificationElement.hidden = true;
+            return;
+        }
+        if (node.verificationLoading) {
+            verificationElement.hidden = false;
+            verificationTitleElement.textContent = t('verificationLoading');
+            verificationReasonElement.textContent = '';
+            return;
+        }
+        if (node.verificationFailed) {
+            verificationElement.hidden = false;
+            verificationTitleElement.textContent = t('verificationFailed');
+            verificationReasonElement.textContent = '';
+            return;
+        }
+        if (!node.verification) {
+            verificationElement.hidden = true;
+            return;
+        }
+        const titles = {
+            hallucination_found: 'verificationFound',
+            no_hallucination_found: 'verificationClear',
+            inconclusive: 'verificationInconclusive',
+        };
+        verificationElement.hidden = false;
+        verificationTitleElement.textContent = t(titles[node.verification.status]);
+        verificationReasonElement.textContent = node.verification.reason;
+        node.verification.problematic_claims.forEach((claim) => {
+            const item = document.createElement('li');
+            item.textContent = claim;
+            verificationClaimsElement.appendChild(item);
+        });
+        (node.verification.sources || []).forEach((source) => {
+            const item = document.createElement('li');
+            const link = document.createElement('a');
+            link.href = source.url;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = `${source.relation}: ${source.title}${source.retrieved_at ? ` (${source.retrieved_at})` : ''}`;
+            item.appendChild(link);
+            verificationSourcesElement.appendChild(item);
+        });
     }
 
     function renderCandidates() {
@@ -121,6 +175,7 @@
         renderActivePath();
         renderCandidates();
         renderTree();
+        renderVerification();
     }
 
     function setLoading(isLoading) {
@@ -204,6 +259,40 @@
         render();
     }
 
+    async function verifyPath() {
+        const node = activeNode();
+        const root = rootNode();
+        if (!node?.responsePrefix || node.verificationLoading) return;
+        node.verificationLoading = true;
+        node.verificationFailed = false;
+        render();
+        try {
+            if (isStaticDemo) {
+                node.verification = {
+                    status: 'hallucination_found',
+                    reason: 'A continuação apresenta uma explicação factual que precisa de verificação.',
+                    problematic_claims: ['A explicação apresentada não foi confirmada por fontes externas.'],
+                    sources: [{ title: 'NASA: The Moon Illusion', url: 'https://science.nasa.gov/solar-system/moon/the-moon-illusion-why-does-the-moon-look-so-big-sometimes/', relation: 'contradicts', retrieved_at: '2026-10-02' }],
+                };
+            } else {
+                const response = await fetch('/api/verify-hallucination', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: root.context, response: node.responsePrefix, locale: window.i18n.getLocale() }),
+                });
+                if (!response.ok) throw new Error('Could not verify the path response.');
+                node.verification = await response.json();
+            }
+        } catch (error) {
+            node.verification = null;
+            node.verificationFailed = true;
+            console.error(error);
+        } finally {
+            node.verificationLoading = false;
+            if (state.activeNodeId === node.id) render();
+        }
+    }
+
     startButton.addEventListener('click', startPath);
     input.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' && !event.shiftKey) {
@@ -211,6 +300,6 @@
             startPath();
         }
     });
-    finishButton.addEventListener('click', () => { statusElement.textContent = t('pathFinished'); });
+    finishButton.addEventListener('click', verifyPath);
     document.addEventListener('localechange', render);
 })();

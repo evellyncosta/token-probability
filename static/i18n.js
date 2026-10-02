@@ -3,8 +3,8 @@
     const SUPPORTED_LOCALES = new Set(['pt-BR', 'en']);
     const STORAGE_KEY = 'token-probability-locale';
     const fallbackTranslations = {
-        'pt-BR': { pathComplete: 'Esta continuação foi completamente revelada.', pathPremise: 'Premissa', assistantResponse: 'Resposta do assistant', pathResponseEmpty: 'Escolha um token para revelar a resposta.' },
-        en: { pathComplete: 'This continuation has been fully revealed.', pathPremise: 'Premise', assistantResponse: 'Assistant response', pathResponseEmpty: 'Choose a token to reveal the response.' },
+        'pt-BR': { pathComplete: 'Esta continuação foi completamente revelada.', pathPremise: 'Premissa', assistantResponse: 'Resposta do assistant', pathResponseEmpty: 'Escolha um token para revelar a resposta.', verificationLoading: 'Verificando possível alucinação...', verificationFound: 'Possível alucinação encontrada', verificationClear: 'Nenhuma possível alucinação encontrada', verificationInconclusive: 'Verificação inconclusiva', verificationFailed: 'Não foi possível verificar esta resposta. Tente novamente.', verificationLimit: 'Esta é uma avaliação por LLM, sem confirmação por fontes externas.' },
+        en: { pathComplete: 'This continuation has been fully revealed.', pathPremise: 'Premise', assistantResponse: 'Assistant response', pathResponseEmpty: 'Choose a token to reveal the response.', verificationLoading: 'Checking for a possible hallucination...', verificationFound: 'Possible hallucination found', verificationClear: 'No possible hallucination found', verificationInconclusive: 'Verification is inconclusive', verificationFailed: 'This response could not be verified. Try again.', verificationLimit: 'This is an LLM assessment, without confirmation from external sources.' },
     };
     const translations = {
         'pt-BR': {
